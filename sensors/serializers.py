@@ -7,7 +7,7 @@ class SensorReadingSerializer(serializers.Serializer):
     timestamp = serializers.DateTimeField()
     voltage = serializers.FloatField()
     current = serializers.FloatField()
-    power = serializers.FloatField()
+    #power = serializers.FloatField()
     energy = serializers.FloatField()
     frequency = serializers.FloatField()
     pf = serializers.FloatField()

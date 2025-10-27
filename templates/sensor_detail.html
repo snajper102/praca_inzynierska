@@ -1,10 +1,95 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pl">
 <head>
   <meta charset="UTF-8">
-  <title>$Title$</title>
+  <title>Szczegóły czujnika: {{ sensor.name }}</title>
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+  <style>
+    /* ... Twoje style ... */
+  </style>
 </head>
 <body>
-$END$
+  <div class="container">
+    <h1>{{ sensor.name }}</h1>
+
+    <div class="energy-summary">
+      <h3>Zużycie energii</h3>
+      <p>Ostatnia godzina: {{ hourly_kwh|floatformat:2 }} kWh</p>
+      <p>Dzisiaj: {{ daily_kwh|floatformat:2 }} kWh</p>
+    </div>
+
+    <div class="chart-container">
+      <h2>Wykres mocy</h2>
+      <canvas id="powerChart"></canvas>
+    </div>
+
+    <div class="chart-container">
+      <h2>Wykres napięcia</h2>
+      <canvas id="voltageChart"></canvas>
+    </div>
+
+    <h2>Ostatnie 20 pomiarów</h2>
+    <table>
+      <thead>
+        <tr>
+          <th>Czas</th><th>U(V)</th><th>I(A)</th><th>P(W)</th><th>Energy</th><th>Freq</th><th>PF</th>
+        </tr>
+      </thead>
+      <tbody>
+        {% for d in data_qs|slice:"-20:" %}
+        <tr>
+          <td>{{ d.timestamp }}</td>
+          <td>{{ d.voltage }}</td>
+          <td>{{ d.current }}</td>
+          <td>{{ d.power }}</td>
+          <td>{{ d.energy }}</td>
+          <td>{{ d.frequency }}</td>
+          <td>{{ d.pf }}</td>
+        </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <script>
+    const timestamps  = {{ timestamps|safe }};
+    const powerData   = {{ powers|safe }};
+    // For voltage you’ll need to rebuild that list in view if desired...
+    // Or you can omit voltage chart and keep only power.
+
+    // Init charts
+    window.powerChart = new Chart(
+      document.getElementById('powerChart').getContext('2d'),
+      { type: 'line',
+        data: { labels: timestamps, datasets: [{ label: 'Moc (W)', data: powerData, fill: true }] },
+        options: {} }
+    );
+
+    // Live update
+    async function fetchAndUpdate() {
+      const resp = await fetch("{% url 'sensor-data' sensor.id %}");
+      const data = await resp.json();
+      const slice20 = data.slice(-20);
+
+      const newTs = slice20.map(x => x.timestamp);
+      const newP  = slice20.map(x => x.power);
+
+      window.powerChart.data.labels = newTs;
+      window.powerChart.data.datasets[0].data = newP;
+      window.powerChart.update();
+
+      const tbody = document.querySelector('table tbody');
+      tbody.innerHTML = '';
+      slice20.forEach(d => {
+        tbody.insertAdjacentHTML('beforeend', `
+          <tr>
+            <td>${d.timestamp}</td><td>${d.voltage}</td><td>${d.current}</td>
+            <td>${d.power}</td><td>${d.energy}</td>
+            <td>${d.frequency}</td><td>${d.pf}</td>
+          </tr>`);
+      });
+    }
+    setInterval(fetchAndUpdate, 10000);
+  </script>
 </body>
 </html>

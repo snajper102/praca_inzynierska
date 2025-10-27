@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="pl">
+<head>
+  <meta charset="UTF-8">
+  <title>Dashboard użytkownika</title>
+  <style>
+    /* Globalne style */
+    body {
+      margin: 0;
+      padding: 0;
+      font-family: Arial, sans-serif;
+      background-color: #f4f4f4;
+    }
+    .container {
+      max-width: 1200px;
+      margin: 20px auto;
+      padding: 20px;
+      background: #fff;
+      border-radius: 8px;
+      box-shadow: 0 0 10px rgba(0,0,0,0.1);
+    }
+    header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 20px;
+    }
+    header h1 {
+      margin: 0;
+      color: #333;
+    }
+    header nav a {
+      text-decoration: none;
+      color: #007bff;
+      font-weight: bold;
+    }
+    /* Kontener na domy – układ flex */
+    .houses-container {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 20px;
+    }
+    .house {
+      width: calc(33.33% - 20px);
+      border: 1px solid #ddd;
+      padding: 15px;
+      border-radius: 5px;
+      background: #fff;
+      transition: background 0.3s ease;
+    }
+    .house:hover {
+      background-color: #f9f9f9;
+    }
+    .house-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    .house-header h2 {
+      margin: 0;
+      color: #333;
+      font-size: 1.2rem;
+    }
+    .house-header span {
+      color: #666;
+      font-size: 0.95rem;
+    }
+    .house-content {
+      margin-top: 15px;
+    }
+    /* Style dla czujników */
+    .sensor {
+      background: #f9f9f9;
+      padding: 10px;
+      margin-bottom: 10px;
+      border-radius: 4px;
+      transition: background 0.3s ease;
+    }
+    .sensor:hover {
+      background: #ececec;
+    }
+    .sensor-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 5px;
+    }
+    .sensor-header h3 {
+      margin: 0;
+      color: #555;
+      font-size: 1rem;
+    }
+    .sensor-header a {
+      text-decoration: none;
+      background: #007bff;
+      color: #fff;
+      padding: 5px 10px;
+      border-radius: 4px;
+      font-size: 1rem;
+      transition: background 0.3s ease;
+    }
+    .sensor-header a:hover {
+      background: #0056b3;
+    }
+    .sensor-description {
+      margin: 5px 0 10px;
+      color: #777;
+      font-size: 0.9rem;
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <header>
+      <h1>Twój Dashboard</h1>
+      <nav>
+        <a href="{% url 'logout' %}">Wyloguj się</a>
+      </nav>
+    </header>
+    {% if houses %}
+      <div class="houses-container">
+        {% for house in houses %}
+          <div class="house">
+            <div class="house-header">
+              <h2>{{ house.name }}</h2>
+              <span>{{ house.address }}</span>
+            </div>
+            <div class="house-content">
+              {% if house.sensors.all %}
+                {% for sensor in house.sensors.all %}
+                  <div class="sensor">
+                    <div class="sensor-header">
+                      <h3>{{ sensor.name }}</h3>
+                      <!-- Link do widoku szczegółów czujnika -->
+                      <a href="{% url 'sensor_detail' sensor.id %}">Szczegóły</a>
+                    </div>
+                    <p class="sensor-description">{{ sensor.description }}</p>
+                  </div>
+                {% endfor %}
+              {% else %}
+                <p>Brak czujników w tym domu.</p>
+              {% endif %}
+            </div>
+          </div>
+        {% endfor %}
+      </div>
+    {% else %}
+      <p>Nie masz jeszcze dodanych domów.</p>
+    {% endif %}
+  </div>
+</body>
+</html>

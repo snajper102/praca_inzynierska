@@ -1,10 +1,379 @@
 <!DOCTYPE html>
-<html lang="en">
+<html lang="pl">
 <head>
   <meta charset="UTF-8">
-  <title>$Title$</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Logowanie - Energy Monitor</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+  <style>
+    * {
+      margin: 0;
+      padding: 0;
+      box-sizing: border-box;
+    }
+
+    body {
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      background: linear-gradient(135deg, #0f172a 0%, #1e293b 50%, #334155 100%);
+      min-height: 100vh;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      padding: 1rem;
+    }
+
+    .login-container {
+      background: rgba(30, 41, 59, 0.8);
+      backdrop-filter: blur(20px);
+      border: 1px solid rgba(51, 65, 85, 0.6);
+      border-radius: 1.5rem;
+      padding: 3rem;
+      width: 100%;
+      max-width: 450px;
+      box-shadow: 0 20px 60px rgba(0, 0, 0, 0.5);
+      animation: slideUp 0.6s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(30px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    .logo {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+
+    .logo i {
+      font-size: 4rem;
+      color: #3b82f6;
+      animation: pulse 2s ease-in-out infinite;
+    }
+
+    @keyframes pulse {
+      0%, 100% {
+        transform: scale(1);
+      }
+      50% {
+        transform: scale(1.1);
+      }
+    }
+
+    .logo h1 {
+      color: #f1f5f9;
+      font-size: 2rem;
+      margin-top: 1rem;
+      font-weight: 700;
+    }
+
+    .logo p {
+      color: #94a3b8;
+      font-size: 0.9rem;
+      margin-top: 0.5rem;
+    }
+
+    .tabs {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 2rem;
+      background: rgba(15, 23, 42, 0.6);
+      padding: 0.5rem;
+      border-radius: 0.75rem;
+    }
+
+    .tab {
+      flex: 1;
+      padding: 0.75rem;
+      border: none;
+      background: transparent;
+      color: #94a3b8;
+      font-size: 1rem;
+      font-weight: 600;
+      cursor: pointer;
+      border-radius: 0.5rem;
+      transition: all 0.3s ease;
+    }
+
+    .tab.active {
+      background: #3b82f6;
+      color: white;
+    }
+
+    .tab:hover:not(.active) {
+      background: rgba(59, 130, 246, 0.1);
+      color: #f1f5f9;
+    }
+
+    .form-container {
+      display: none;
+    }
+
+    .form-container.active {
+      display: block;
+      animation: fadeIn 0.4s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from {
+        opacity: 0;
+      }
+      to {
+        opacity: 1;
+      }
+    }
+
+    .form-group {
+      margin-bottom: 1.5rem;
+    }
+
+    .form-group label {
+      display: block;
+      color: #f1f5f9;
+      font-weight: 600;
+      margin-bottom: 0.5rem;
+      font-size: 0.9rem;
+    }
+
+    .input-wrapper {
+      position: relative;
+    }
+
+    .input-wrapper i {
+      position: absolute;
+      left: 1rem;
+      top: 50%;
+      transform: translateY(-50%);
+      color: #64748b;
+      font-size: 1.1rem;
+    }
+
+    .form-control {
+      width: 100%;
+      padding: 0.875rem 1rem 0.875rem 3rem;
+      background: rgba(15, 23, 42, 0.6);
+      border: 1px solid #334155;
+      border-radius: 0.75rem;
+      color: #f1f5f9;
+      font-size: 1rem;
+      transition: all 0.3s ease;
+    }
+
+    .form-control:focus {
+      outline: none;
+      border-color: #3b82f6;
+      box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.1);
+    }
+
+    .form-control::placeholder {
+      color: #64748b;
+    }
+
+    .btn-submit {
+      width: 100%;
+      padding: 1rem;
+      background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+      border: none;
+      border-radius: 0.75rem;
+      color: white;
+      font-size: 1rem;
+      font-weight: 700;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      margin-top: 1rem;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+
+    .btn-submit:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+    }
+
+    .btn-submit:active {
+      transform: translateY(0);
+    }
+
+    .error-message {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid rgba(239, 68, 68, 0.3);
+      color: #fca5a5;
+      padding: 1rem;
+      border-radius: 0.75rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      animation: shake 0.5s ease-in-out;
+    }
+
+    @keyframes shake {
+      0%, 100% {
+        transform: translateX(0);
+      }
+      25% {
+        transform: translateX(-10px);
+      }
+      75% {
+        transform: translateX(10px);
+      }
+    }
+
+    .success-message {
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.3);
+      color: #6ee7b7;
+      padding: 1rem;
+      border-radius: 0.75rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+    }
+
+    .forgot-password {
+      text-align: center;
+      margin-top: 1.5rem;
+    }
+
+    .forgot-password a {
+      color: #3b82f6;
+      text-decoration: none;
+      font-size: 0.9rem;
+      transition: color 0.3s ease;
+    }
+
+    .forgot-password a:hover {
+      color: #60a5fa;
+    }
+
+    @media (max-width: 480px) {
+      .login-container {
+        padding: 2rem 1.5rem;
+      }
+
+      .logo h1 {
+        font-size: 1.5rem;
+      }
+    }
+  </style>
 </head>
 <body>
-$END$
+  <div class="login-container">
+    <div class="logo">
+      <i class="fas fa-bolt"></i>
+      <h1>Energy Monitor</h1>
+      <p>System monitorowania energii</p>
+    </div>
+
+    <div class="tabs">
+      <button class="tab active" onclick="switchTab('login')">
+        <i class="fas fa-sign-in-alt"></i> Logowanie
+      </button>
+      <button class="tab" onclick="switchTab('register')">
+        <i class="fas fa-user-plus"></i> Rejestracja
+      </button>
+    </div>
+
+    <!-- Login Form -->
+    <div id="loginForm" class="form-container active">
+      {% if form.errors %}
+      <div class="error-message">
+        <i class="fas fa-exclamation-circle"></i>
+        <span>Nieprawidłowa nazwa użytkownika lub hasło</span>
+      </div>
+      {% endif %}
+
+      <form method="post" action="{% url 'login' %}">
+        {% csrf_token %}
+        <div class="form-group">
+          <label for="username">Nazwa użytkownika</label>
+          <div class="input-wrapper">
+            <i class="fas fa-user"></i>
+            <input type="text" id="username" name="username" class="form-control" placeholder="Wprowadź nazwę użytkownika" required autofocus>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="password">Hasło</label>
+          <div class="input-wrapper">
+            <i class="fas fa-lock"></i>
+            <input type="password" id="password" name="password" class="form-control" placeholder="Wprowadź hasło" required>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-submit">
+          <i class="fas fa-sign-in-alt"></i> Zaloguj się
+        </button>
+      </form>
+
+      <div class="forgot-password">
+        <a href="#">Zapomniałeś hasła?</a>
+      </div>
+    </div>
+
+    <!-- Register Form -->
+    <div id="registerForm" class="form-container">
+      <form method="post" action="/register/">
+        {% csrf_token %}
+        <div class="form-group">
+          <label for="reg_username">Nazwa użytkownika</label>
+          <div class="input-wrapper">
+            <i class="fas fa-user"></i>
+            <input type="text" id="reg_username" name="username" class="form-control" placeholder="Wybierz nazwę użytkownika" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="reg_email">Email</label>
+          <div class="input-wrapper">
+            <i class="fas fa-envelope"></i>
+            <input type="email" id="reg_email" name="email" class="form-control" placeholder="twoj@email.com" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="reg_password1">Hasło</label>
+          <div class="input-wrapper">
+            <i class="fas fa-lock"></i>
+            <input type="password" id="reg_password1" name="password1" class="form-control" placeholder="Minimum 8 znaków" required>
+          </div>
+        </div>
+
+        <div class="form-group">
+          <label for="reg_password2">Potwierdź hasło</label>
+          <div class="input-wrapper">
+            <i class="fas fa-lock"></i>
+            <input type="password" id="reg_password2" name="password2" class="form-control" placeholder="Powtórz hasło" required>
+          </div>
+        </div>
+
+        <button type="submit" class="btn-submit">
+          <i class="fas fa-user-plus"></i> Zarejestruj się
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <script>
+    function switchTab(tab) {
+      // Update tabs
+      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+      event.target.closest('.tab').classList.add('active');
+
+      // Update forms
+      document.querySelectorAll('.form-container').forEach(f => f.classList.remove('active'));
+      if (tab === 'login') {
+        document.getElementById('loginForm').classList.add('active');
+      } else {
+        document.getElementById('registerForm').classList.add('active');
+      }
+    }
+  </script>
 </body>
 </html>

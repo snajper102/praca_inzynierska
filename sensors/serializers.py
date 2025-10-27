@@ -39,3 +39,4 @@ class SensorDataSerializer(serializers.ModelSerializer):
         model = SensorData
         fields = ['id', 'sensor', 'timestamp', 'voltage', 'current', 'power', 'energy', 'frequency', 'pf']
         read_only_fields = ['timestamp']
+####

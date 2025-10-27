@@ -4,7 +4,7 @@ from .views import (
     AdminHouseViewSet, AdminSensorViewSet,
     UserHouseViewSet, UserSensorViewSet,
     sensor_data_view, add_sensor_data, receive_sensor_readings,
-    dashboard, sensor_detail  # Import nowego widoku
+    dashboard, sensor_detail
 )
 
 router = DefaultRouter()

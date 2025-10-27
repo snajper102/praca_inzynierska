@@ -9,7 +9,6 @@ from django.contrib.auth.forms import UserCreationForm
 from django.contrib import messages
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-
 from rest_framework import viewsets, status
 from rest_framework.response import Response
 from rest_framework.decorators import (
@@ -202,11 +201,65 @@ def sensor_data_view(request, sensor_id):
 
 @login_required
 def dashboard(request):
-    """Główny dashboard użytkownika"""
+    """Główny dashboard użytkownika z kosztami miesięcznymi"""
+    from datetime import datetime
+    from django.db.models import Sum
+
     houses = House.objects.filter(user=request.user).prefetch_related('sensors__data')
-    return render(request, 'dashboard.html', {'houses': houses})
 
+    # Oblicz koszty dla każdego domu
+    now = timezone.now()
+    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
+    houses_with_costs = []
+    for house in houses:
+        # Pobierz wszystkie dane z czujników w tym domu w bieżącym miesiącu
+        sensors_in_house = house.sensors.all()
+
+        # Oblicz całkowitą energię i moc dla domu
+        total_energy_wh = 0
+        total_power_now = 0
+        sensor_count = 0
+
+        for sensor in sensors_in_house:
+            # Dane z bieżącego miesiąca
+            monthly_data = SensorData.objects.filter(
+                sensor=sensor,
+                timestamp__gte=start_of_month
+            ).order_by('timestamp')
+
+            if monthly_data.exists():
+                # Oblicz energię przez całkowanie mocy
+                for i in range(1, len(monthly_data)):
+                    dt = (monthly_data[i].timestamp - monthly_data[i - 1].timestamp).total_seconds()
+                    power = float(monthly_data[i].power) if monthly_data[i].power else 0
+                    total_energy_wh += power * dt / 3600.0
+
+                # Aktualna moc (ostatni pomiar)
+                last_reading = monthly_data.last()
+                if last_reading and last_reading.power:
+                    total_power_now += float(last_reading.power)
+
+                sensor_count += 1
+
+        # Przelicz na kWh i koszt
+        total_energy_kwh = total_energy_wh / 1000.0
+        monthly_cost = total_energy_kwh * house.price_per_kwh
+
+        houses_with_costs.append({
+            'house': house,
+            'monthly_kwh': round(total_energy_kwh, 2),
+            'monthly_cost': round(monthly_cost, 2),
+            'current_power': round(total_power_now, 0),
+            'sensor_count': sensor_count
+        })
+
+    context = {
+        'houses': houses,
+        'houses_with_costs': houses_with_costs,
+        'current_month': now.strftime('%B %Y'),
+    }
+    return render(request, 'dashboard.html', context)
 @login_required
 def sensor_detail(request, sensor_id):
     """Szczegółowy widok czujnika z wykresami"""

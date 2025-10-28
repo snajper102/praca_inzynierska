@@ -1,6 +1,4 @@
-
 {% extends 'base.html' %}
-{% load cost_filters %}
 
 {% block title %}Dashboard - Energy Monitor{% endblock %}
 
@@ -340,102 +338,28 @@
     </div>
   </div>
 </div>
-<!-- Monthly Summary Banner -->
-{% if houses_with_costs %}
-<div style="background: linear-gradient(135deg, #1e293b 0%, #334155 100%); border: 1px solid #334155; border-radius: 1rem; padding: 2rem; margin-bottom: 2rem; animation: fadeIn 0.8s ease-out;">
-  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 1.5rem;">
-    <h2 style="color: #f1f5f9; font-size: 1.5rem; display: flex; align-items: center; gap: 0.75rem;">
-      <i class="fas fa-calendar-alt" style="color: #3b82f6;"></i>
-      Podsumowanie: {{ current_month }}
-    </h2>
-  </div>
-  
-  <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 2rem;">
-    {% for item in houses_with_costs %}
-    <div style="border-left: 3px solid #3b82f6; padding-left: 1rem;">
-      <div style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 0.5rem;">
-        <i class="fas fa-home"></i> {{ item.house.name }}
-      </div>
-      <div style="color: #f1f5f9; font-size: 1.75rem; font-weight: 700; margin-bottom: 0.25rem;">
-        {{ item.monthly_cost }} PLN
-      </div>
-      <div style="color: #64748b; font-size: 0.85rem;">
-        {{ item.monthly_kwh }} kWh • {{ item.sensor_count }} czujnik{{ item.sensor_count|pluralize:"i,ów" }}
-      </div>
-    </div>
-    {% endfor %}
-    
-    <!-- Total -->
-    <div style="border-left: 3px solid #f59e0b; padding-left: 1rem; background: rgba(245, 158, 11, 0.05); padding: 1rem; border-radius: 0.5rem; margin-left: auto;">
-      <div style="color: #94a3b8; font-size: 0.9rem; margin-bottom: 0.5rem;">
-        <i class="fas fa-calculator"></i> RAZEM
-      </div>
-      <div style="color: #f59e0b; font-size: 2rem; font-weight: 700; margin-bottom: 0.25rem;">
-        {% widthratio houses_with_costs|length 1 0 as total_cost %}
-        {% for item in houses_with_costs %}
-          {% if forloop.first %}{{ item.monthly_cost }}{% else %}+{{ item.monthly_cost }}{% endif %}
-        {% endfor %}
-        {% comment %}Suma kosztów{% endcomment %}
-        {{ houses_with_costs|sum_costs }} PLN
-      </div>
-      <div style="color: #64748b; font-size: 0.85rem;">
-        {{ houses_with_costs|sum_kwh }} kWh w tym miesiącu
-      </div>
-    </div>
-  </div>
-</div>
-{% endif %}
+
 <!-- Houses Grid -->
-{% if houses_with_costs %}
+{% if houses %}
   <div class="houses-grid">
-    {% for item in houses_with_costs %}
+    {% for house in houses %}
       <div class="house-card">
         <div class="house-header">
           <div class="house-title">
             <i class="fas fa-home"></i>
-            <h2>{{ item.house.name }}</h2>
+            <h2>{{ house.name }}</h2>
           </div>
-          {% if item.house.address %}
+          {% if house.address %}
             <div class="house-address">
               <i class="fas fa-map-marker-alt"></i>
-              <span>{{ item.house.address }}</span>
+              <span>{{ house.address }}</span>
             </div>
           {% endif %}
         </div>
 
-        <!-- Koszty miesięczne -->
-        <div style="padding: 1rem 1.5rem; background: rgba(15, 23, 42, 0.4); border-bottom: 1px solid #334155;">
-          <div style="display: grid; grid-template-columns: repeat(3, 1fr); gap: 1rem; text-align: center;">
-            <div>
-              <div style="color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 0.25rem;">
-                Miesiąc
-              </div>
-              <div style="color: #3b82f6; font-size: 1.25rem; font-weight: 700;">
-                {{ item.monthly_kwh }} kWh
-              </div>
-            </div>
-            <div>
-              <div style="color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 0.25rem;">
-                Koszt
-              </div>
-              <div style="color: #f59e0b; font-size: 1.25rem; font-weight: 700;">
-                {{ item.monthly_cost }} PLN
-              </div>
-            </div>
-            <div>
-              <div style="color: #94a3b8; font-size: 0.75rem; text-transform: uppercase; margin-bottom: 0.25rem;">
-                Teraz
-              </div>
-              <div style="color: #10b981; font-size: 1.25rem; font-weight: 700;">
-                {{ item.current_power }} W
-              </div>
-            </div>
-          </div>
-        </div>
-
         <div class="sensors-list">
-          {% if item.house.sensors.all %}
-            {% for sensor in item.house.sensors.all %}
+          {% if house.sensors.all %}
+            {% for sensor in house.sensors.all %}
               <div class="sensor-item">
                 <div class="sensor-header">
                   <div class="sensor-name">
@@ -455,11 +379,14 @@
                 <div class="sensor-actions">
                   <a href="{% url 'sensor_detail' sensor.id %}" class="btn-details">
                     <i class="fas fa-chart-area"></i>
-                    Zobacz szczegóły
+                    Szczegóły
                   </a>
-                  <button class="btn-settings">
-                    <i class="fas fa-cog"></i>
-                  </button>
+                  <a href="{% url 'live_widget' sensor.id %}" class="btn-settings" style="text-decoration: none; padding: 0.75rem 1rem;">
+                    <i class="fas fa-bolt"></i> Live
+                  </a>
+                  <a href="{% url 'comparison' house.id %}" class="btn-settings" style="text-decoration: none; padding: 0.75rem 1rem;">
+                    <i class="fas fa-chart-bar"></i>
+                  </a>
                 </div>
               </div>
             {% endfor %}

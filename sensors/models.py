@@ -1,5 +1,6 @@
 from django.db import models
 from django.contrib.auth.models import User
+from django.core.validators import MinValueValidator, MaxValueValidator
 
 
 class House(models.Model):
@@ -9,6 +10,19 @@ class House(models.Model):
     address = models.CharField(max_length=255, blank=True, verbose_name="Adres")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Data utworzenia")
     price_per_kwh = models.FloatField(default=0.80, verbose_name="Cena za kWh [PLN]")
+
+    # Nowe pola dla alertów i limitów
+    monthly_limit_kwh = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name="Limit miesięczny [kWh]",
+        help_text="Alert gdy przekroczono limit"
+    )
+    alert_email = models.EmailField(
+        blank=True,
+        verbose_name="Email do alertów",
+        help_text="Jeśli pusty, użyje email użytkownika"
+    )
 
     class Meta:
         verbose_name = "Dom"
@@ -34,6 +48,34 @@ class Sensor(models.Model):
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="Data dodania")
     is_active = models.BooleanField(default=True, verbose_name="Aktywny")
 
+    # Nowe pola
+    location = models.CharField(
+        max_length=100,
+        blank=True,
+        verbose_name="Lokalizacja",
+        help_text="Np. 'Salon', 'Kuchnia', 'Piwnica'"
+    )
+    icon = models.CharField(
+        max_length=50,
+        default='microchip',
+        verbose_name="Ikona",
+        help_text="Nazwa ikony Font Awesome (bez 'fa-')"
+    )
+    color = models.CharField(
+        max_length=7,
+        default='#3b82f6',
+        verbose_name="Kolor",
+        help_text="Hex color, np. #3b82f6"
+    )
+
+    # Alert thresholds
+    power_threshold = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name="Próg mocy [W]",
+        help_text="Alert gdy moc przekroczy tę wartość"
+    )
+
     class Meta:
         verbose_name = "Czujnik"
         verbose_name_plural = "Czujniki"
@@ -41,6 +83,16 @@ class Sensor(models.Model):
 
     def __str__(self):
         return f"{self.name} - {self.house.name}"
+
+    @property
+    def is_online(self):
+        """Sprawdza czy czujnik jest online (dane w ostatnich 5 min)"""
+        from django.utils import timezone
+        from datetime import timedelta
+        last_reading = self.data.order_by('-timestamp').first()
+        if last_reading:
+            return (timezone.now() - last_reading.timestamp) < timedelta(minutes=5)
+        return False
 
 
 class SensorData(models.Model):
@@ -82,3 +134,132 @@ class SensorData(models.Model):
         if self.pf and self.pf != 0 and self.power:
             return self.power / self.pf
         return 0
+
+
+class Alert(models.Model):
+    """Model alertów/powiadomień"""
+    ALERT_TYPES = [
+        ('power_high', 'Przekroczono próg mocy'),
+        ('monthly_limit', 'Przekroczono limit miesięczny'),
+        ('sensor_offline', 'Czujnik offline'),
+        ('anomaly', 'Wykryto anomalię'),
+    ]
+
+    SEVERITY = [
+        ('info', 'Informacja'),
+        ('warning', 'Ostrzeżenie'),
+        ('critical', 'Krytyczny'),
+    ]
+
+    house = models.ForeignKey(House, on_delete=models.CASCADE, related_name='alerts')
+    sensor = models.ForeignKey(
+        Sensor,
+        on_delete=models.CASCADE,
+        related_name='alerts',
+        null=True,
+        blank=True
+    )
+    alert_type = models.CharField(max_length=20, choices=ALERT_TYPES, verbose_name="Typ alertu")
+    severity = models.CharField(max_length=10, choices=SEVERITY, default='warning', verbose_name="Ważność")
+    message = models.TextField(verbose_name="Wiadomość")
+    value = models.FloatField(null=True, blank=True, verbose_name="Wartość")
+    threshold = models.FloatField(null=True, blank=True, verbose_name="Próg")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Data utworzenia")
+    is_read = models.BooleanField(default=False, verbose_name="Przeczytane")
+    is_resolved = models.BooleanField(default=False, verbose_name="Rozwiązane")
+    email_sent = models.BooleanField(default=False, verbose_name="Email wysłany")
+
+    class Meta:
+        verbose_name = "Alert"
+        verbose_name_plural = "Alerty"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['house', '-created_at']),
+            models.Index(fields=['is_read', 'is_resolved']),
+        ]
+
+    def __str__(self):
+        return f"{self.get_alert_type_display()} - {self.house.name} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"
+
+
+class UserSettings(models.Model):
+    """Ustawienia użytkownika"""
+    user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='settings')
+
+    # Personalizacja
+    theme = models.CharField(
+        max_length=10,
+        choices=[('dark', 'Ciemny'), ('light', 'Jasny')],
+        default='dark',
+        verbose_name="Motyw"
+    )
+
+    # Alerty
+    email_alerts = models.BooleanField(default=True, verbose_name="Alerty email")
+    alert_frequency = models.CharField(
+        max_length=20,
+        choices=[
+            ('immediate', 'Natychmiast'),
+            ('hourly', 'Co godzinę'),
+            ('daily', 'Dziennie'),
+        ],
+        default='immediate',
+        verbose_name="Częstotliwość alertów"
+    )
+
+    # Widget
+    live_refresh_interval = models.IntegerField(
+        default=5,
+        validators=[MinValueValidator(1), MaxValueValidator(60)],
+        verbose_name="Odświeżanie [s]",
+        help_text="Co ile sekund odświeżać widget live (1-60)"
+    )
+
+    # Predykcje
+    show_predictions = models.BooleanField(default=True, verbose_name="Pokazuj predykcje")
+    monthly_goal_kwh = models.FloatField(
+        null=True,
+        blank=True,
+        verbose_name="Cel miesięczny [kWh]"
+    )
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        verbose_name = "Ustawienia użytkownika"
+        verbose_name_plural = "Ustawienia użytkowników"
+
+    def __str__(self):
+        return f"Ustawienia - {self.user.username}"
+
+
+class ActivityLog(models.Model):
+    """Historia zmian (audit log)"""
+    ACTION_TYPES = [
+        ('create', 'Utworzono'),
+        ('update', 'Zaktualizowano'),
+        ('delete', 'Usunięto'),
+        ('assign', 'Przypisano'),
+        ('alert', 'Alert'),
+    ]
+
+    user = models.ForeignKey(User, on_delete=models.SET_NULL, null=True, related_name='activity_logs')
+    action = models.CharField(max_length=20, choices=ACTION_TYPES, verbose_name="Akcja")
+    model_name = models.CharField(max_length=50, verbose_name="Model")
+    object_id = models.IntegerField(verbose_name="ID obiektu")
+    description = models.TextField(verbose_name="Opis")
+    ip_address = models.GenericIPAddressField(null=True, blank=True, verbose_name="Adres IP")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="Data")
+
+    class Meta:
+        verbose_name = "Log aktywności"
+        verbose_name_plural = "Logi aktywności"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['-created_at']),
+            models.Index(fields=['user', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.get_action_display()} - {self.model_name} #{self.object_id} ({self.created_at.strftime('%Y-%m-%d %H:%M')})"

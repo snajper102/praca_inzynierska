@@ -102,6 +102,7 @@
       background: rgba(59, 130, 246, 0.1);
     }
 
+    /* Styl dla przycisku wylogowania, aby wyglądał jak link/przycisk */
     .btn-logout {
       background: var(--danger);
       color: white;
@@ -111,12 +112,24 @@
       cursor: pointer;
       transition: all 0.3s ease;
       font-weight: 600;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif; /* Dziedziczenie czcionki */
+      font-size: 1rem; /* Upewnij się, że rozmiar czcionki jest spójny */
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
     }
 
     .btn-logout:hover {
       background: #dc2626;
       transform: translateY(-2px);
       box-shadow: 0 4px 12px rgba(239, 68, 68, 0.4);
+    }
+    
+    /* Wrapper dla formularza wylogowania, aby nie psuł layoutu */
+    .logout-form-wrapper {
+      margin: 0;
+      padding: 0;
+      display: inline;
     }
 
     /* Container */
@@ -158,7 +171,7 @@
     }
 
     /* Responsive */
-    @media (max-width: 768px) {
+    @media (max-width: 900px) { /* Zwiększony breakpoint dla lepszego menu */
       .navbar-content {
         flex-direction: column;
         gap: 1rem;
@@ -167,6 +180,16 @@
       .navbar-menu {
         flex-direction: column;
         width: 100%;
+        align-items: stretch; /* Rozciągnij elementy w kolumnie */
+      }
+      
+      .logout-form-wrapper {
+        display: block; /* Formularz zajmie całą szerokość */
+      }
+      
+      .btn-logout {
+        width: 100%; /* Przycisk wylogowania na całą szerokość */
+        justify-content: center; /* Wyśrodkuj tekst w przycisku */
       }
 
       .container {
@@ -189,14 +212,31 @@
           <i class="fas fa-chart-line"></i>
           Dashboard
         </a>
+        
+        <a href="{% url 'alerts' %}" class="nav-link {% if request.path == '/alerts/' %}active{% endif %}">
+          <i class="fas fa-bell"></i>
+          Alerty
+        </a>
+
+        {% if user.is_staff %}
+        <a href="{% url 'admin_dashboard' %}" class="nav-link {% if request.path == '/admin-panel/' %}active{% endif %}">
+          <i class="fas fa-crown"></i>
+          Admin Panel
+        </a>
+        {% endif %}
+        
         <a href="{% url 'profile' %}" class="nav-link {% if request.path == '/profile/' %}active{% endif %}">
           <i class="fas fa-user"></i>
           {{ user.username }}
         </a>
-        <a href="{% url 'logout' %}" class="btn-logout">
-          <i class="fas fa-sign-out-alt"></i>
-          Wyloguj
-        </a>
+        
+        <form action="{% url 'logout' %}" method="POST" class="logout-form-wrapper">
+          {% csrf_token %}
+          <button type="submit" class="btn-logout">
+            <i class="fas fa-sign-out-alt"></i>
+            Wyloguj
+          </button>
+        </form>
       </div>
     </div>
   </nav>

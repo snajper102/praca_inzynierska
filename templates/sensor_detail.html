@@ -1,6 +1,6 @@
 {% extends 'base.html' %}
 
-{% block title %}{{ sensor.name }} - Energy Monitor{% endblock %}
+{% block title %}{{ sensor.name }} - Podsumowanie{% endblock %}
 
 {% block extra_css %}
 <style>
@@ -15,7 +15,6 @@
     border-radius: 0.5rem;
     transition: all 0.3s ease;
   }
-
   .back-button:hover {
     color: #f1f5f9;
     background: var(--bg-tertiary);
@@ -27,6 +26,8 @@
     align-items: center;
     margin-bottom: 2rem;
     animation: fadeIn 0.6s ease-out;
+    flex-wrap: wrap;
+    gap: 1rem;
   }
 
   .sensor-title {
@@ -34,173 +35,122 @@
     align-items: center;
     gap: 1rem;
   }
-
   .sensor-title i {
     font-size: 2.5rem;
-    color: #3b82f6;
+    color: {{ sensor.color|default:'#3b82f6' }};
   }
-
   .sensor-title h1 {
     font-size: 2rem;
     color: #f1f5f9;
   }
+  .sensor-title h1 small {
+    font-size: 1rem;
+    color: #94a3b8;
+    display: block;
+    font-weight: 400;
+  }
 
+  /* --- WSKAŹNIK STATUSU --- */
   .live-indicator {
     display: flex;
     align-items: center;
     gap: 0.75rem;
     padding: 0.75rem 1.25rem;
+    border-radius: 0.75rem;
+    transition: all 0.3s ease;
+  }
+  .live-indicator.online {
     background: rgba(16, 185, 129, 0.1);
     border: 1px solid rgba(16, 185, 129, 0.3);
-    border-radius: 0.75rem;
   }
-
+  .live-indicator.offline {
+    background: rgba(239, 68, 68, 0.1);
+    border: 1px solid rgba(239, 68, 68, 0.3);
+  }
   .live-dot {
     width: 12px;
     height: 12px;
     border-radius: 50%;
+  }
+  .live-indicator.online .live-dot {
     background: #10b981;
     animation: pulse-live 2s ease-in-out infinite;
   }
-
-  @keyframes pulse-live {
-    0%, 100% {
-      box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7);
-    }
-    50% {
-      box-shadow: 0 0 0 10px rgba(16, 185, 129, 0);
-    }
+  .live-indicator.offline .live-dot {
+    background: #ef4444;
   }
-
   .live-text {
-    color: #10b981;
     font-weight: 600;
   }
+  .live-indicator.online .live-text { color: #10b981; }
+  .live-indicator.offline .live-text { color: #ef4444; }
+  
+  @keyframes pulse-live {
+    0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.7); }
+    50% { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+  }
 
-  .energy-summary {
+  /* --- KAFLE (GRID) --- */
+  .stats-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     gap: 1.5rem;
     margin-bottom: 2rem;
   }
 
-  .energy-card {
+  .stat-card {
     background: linear-gradient(135deg, #1e293b 0%, #334155 100%);
     border: 1px solid #334155;
     border-radius: 1rem;
     padding: 1.5rem;
     transition: all 0.3s ease;
+    border-bottom: 4px solid var(--accent);
   }
-
-  .energy-card:hover {
-    transform: translateY(-4px);
-    border-color: #3b82f6;
-    box-shadow: 0 12px 24px rgba(59, 130, 246, 0.2);
+  .stat-card.secondary {
+    background: var(--bg-secondary);
+    border-bottom-color: #64748b;
   }
-
-  .energy-card h3 {
+  
+  .stat-card h3 {
     color: #94a3b8;
     font-size: 0.9rem;
     font-weight: 600;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
     margin-bottom: 0.75rem;
     display: flex;
     align-items: center;
     gap: 0.5rem;
   }
-
-  .energy-value {
+  .stat-value {
     font-size: 2.5rem;
     font-weight: 700;
     color: #f1f5f9;
+    line-height: 1;
   }
-
-  .energy-unit {
+  .stat-unit {
     font-size: 1rem;
     color: #94a3b8;
     margin-left: 0.5rem;
   }
-
-  .charts-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(500px, 1fr));
-    gap: 2rem;
-    margin-bottom: 2rem;
-  }
-
-  .chart-card {
-    background: var(--bg-secondary);
-    border: 1px solid var(--border);
-    border-radius: 1rem;
-    padding: 1.5rem;
-    animation: fadeIn 1s ease-out;
-  }
-
-  .chart-header {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    margin-bottom: 1.5rem;
-  }
-
-  .chart-header h2 {
-    color: #f1f5f9;
-    font-size: 1.25rem;
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-
-  .chart-header i {
-    color: #3b82f6;
-  }
-
-  .chart-controls {
-    display: flex;
-    gap: 0.5rem;
-  }
-
-  .btn-chart {
-    padding: 0.5rem 1rem;
-    background: rgba(59, 130, 246, 0.1);
-    border: 1px solid #334155;
-    color: #94a3b8;
-    border-radius: 0.5rem;
-    cursor: pointer;
+  .stat-subtext {
+    color: #64748b;
     font-size: 0.85rem;
-    transition: all 0.3s ease;
+    margin-top: 0.5rem;
+    height: 1.2em; /* Rezerwuje miejsce */
   }
 
-  .btn-chart:hover {
-    background: rgba(59, 130, 246, 0.2);
-    color: #f1f5f9;
-  }
-
-  .btn-chart.active {
-    background: #3b82f6;
-    color: white;
-    border-color: #3b82f6;
-  }
-
-  .chart-container {
-    position: relative;
-    height: 300px;
-  }
-
+  /* --- TABELA OSTATNICH ODCZYTÓW --- */
   .data-table {
     background: var(--bg-secondary);
     border: 1px solid var(--border);
     border-radius: 1rem;
     overflow: hidden;
   }
-
   .table-header {
     padding: 1.5rem;
     background: rgba(15, 23, 42, 0.6);
     border-bottom: 1px solid var(--border);
   }
-
   .table-header h2 {
     color: #f1f5f9;
     font-size: 1.25rem;
@@ -208,16 +158,13 @@
     align-items: center;
     gap: 0.75rem;
   }
-
   table {
     width: 100%;
     border-collapse: collapse;
   }
-
   thead {
     background: rgba(15, 23, 42, 0.4);
   }
-
   th {
     padding: 1rem;
     text-align: left;
@@ -225,42 +172,18 @@
     font-weight: 600;
     font-size: 0.85rem;
     text-transform: uppercase;
-    letter-spacing: 0.5px;
   }
-
   td {
     padding: 1rem;
     color: #f1f5f9;
     border-top: 1px solid #334155;
   }
-
-  tbody tr {
-    transition: background 0.3s ease;
-  }
-
   tbody tr:hover {
     background: rgba(59, 130, 246, 0.05);
   }
-
   .value-cell {
     font-family: 'Courier New', monospace;
     font-weight: 600;
-  }
-
-  @media (max-width: 768px) {
-    .charts-grid {
-      grid-template-columns: 1fr;
-    }
-
-    .sensor-header {
-      flex-direction: column;
-      align-items: flex-start;
-      gap: 1rem;
-    }
-
-    .energy-summary {
-      grid-template-columns: 1fr;
-    }
   }
 </style>
 {% endblock %}
@@ -273,85 +196,87 @@
 
 <div class="sensor-header">
   <div class="sensor-title">
-    <i class="fas fa-microchip"></i>
-    <h1>{{ sensor.name }}</h1>
+    <i class="fas fa-{{ sensor.icon|default:'microchip' }}" style="color: {{ sensor.color|default:'#3b82f6' }};"></i>
+    <h1>
+      {{ sensor.name }}
+      <small>{{ sensor.location|default:"Brak lokalizacji" }}</small>
+    </h1>
   </div>
-  <div class="live-indicator">
+  <div class="live-indicator {% if sensor.is_online %}online{% else %}offline{% endif %}">
     <div class="live-dot"></div>
-    <span class="live-text">LIVE</span>
+    <span class="live-text">{% if sensor.is_online %}ONLINE{% else %}OFFLINE{% endif %}</span>
   </div>
 </div>
 
-<!-- Energy Summary -->
-<div class="energy-summary">
-  <div class="energy-card">
-    <h3><i class="fas fa-clock"></i> Ostatnia godzina</h3>
+<div class="stats-grid">
+  <div class="stat-card">
+    <h3><i class="fas fa-bolt"></i> Średnia Moc</h3>
     <div>
-      <span class="energy-value">{{ hourly_kwh|floatformat:2 }}</span>
-      <span class="energy-unit">kWh</span>
+      <span class="stat-value">{{ avg_stats.power|floatformat:0|default:"---" }}</span>
+      <span class="stat-unit">W</span>
+    </div>
+    <div class="stat-subtext">Z ostatnich 5 pomiarów</div>
+  </div>
+  <div class="stat-card">
+    <h3><i class="fas fa-plug"></i> Średnie Napięcie</h3>
+    <div>
+      <span class="stat-value">{{ avg_stats.voltage|floatformat:1|default:"---" }}</span>
+      <span class="stat-unit">V</span>
+    </div>
+    <div class="stat-subtext">Z ostatnich 5 pomiarów</div>
+  </div>
+  <div class="stat-card">
+    <h3><i class="fas fa-wave-square"></i> Średni Prąd</h3>
+    <div>
+      <span class="stat-value">{{ avg_stats.current|floatformat:2|default:"---" }}</span>
+      <span class="stat-unit">A</span>
+    </div>
+    <div class="stat-subtext">Z ostatnich 5 pomiarów</div>
+  </div>
+  <div class="stat-card">
+    <h3><i class="fas fa-tachometer-alt"></i> Średnie PF</h3>
+    <div>
+      <span class="stat-value">{{ avg_stats.pf|floatformat:2|default:"---" }}</span>
+      <span class="stat-unit"></span>
+    </div>
+    <div class="stat-subtext">Z ostatnich 5 pomiarów</div>
+  </div>
+</div>
+
+<div class="stats-grid">
+  <div class="stat-card secondary">
+    <h3><i class="fas fa-calendar-day"></i> Zużycie dzisiaj</h3>
+    <div>
+      <span class="stat-value">{{ daily_kwh|floatformat:2 }}</span>
+      <span class="stat-unit">kWh</span>
     </div>
   </div>
-
-  <div class="energy-card">
-    <h3><i class="fas fa-calendar-day"></i> Dzisiaj</h3>
+  <div class="stat-card secondary">
+    <h3><i class="fas fa-dollar-sign"></i> Koszt dzisiaj</h3>
     <div>
-      <span class="energy-value">{{ daily_kwh|floatformat:2 }}</span>
-      <span class="energy-unit">kWh</span>
+      <span class="stat-value">{{ daily_cost|floatformat:2 }}</span>
+      <span class="stat-unit">PLN</span>
     </div>
   </div>
-
-  <div class="energy-card">
-    <h3><i class="fas fa-dollar-sign"></i> Koszt dzienny</h3>
+  <div class="stat-card secondary">
+    <h3><i class="fas fa-calendar-alt"></i> Zużycie w tym m-cu</h3>
     <div>
-      <span class="energy-value">{{ daily_cost|floatformat:2 }}</span>
-      <span class="energy-unit">PLN</span>
+      <span class="stat-value">{{ monthly_kwh|floatformat:2 }}</span>
+      <span class="stat-unit">kWh</span>
     </div>
   </div>
-
-  <div class="energy-card">
-    <h3><i class="fas fa-bolt"></i> Aktualna moc</h3>
+  <div class="stat-card secondary">
+    <h3><i class="fas fa-file-invoice-dollar"></i> Koszt w tym m-cu</h3>
     <div>
-      <span class="energy-value">{{ powers|last|default:"0"|floatformat:0 }}</span>
-      <span class="energy-unit">W</span>
+      <span class="stat-value">{{ monthly_cost|floatformat:2 }}</span>
+      <span class="stat-unit">PLN</span>
     </div>
   </div>
 </div>
 
-<!-- Charts -->
-<div class="charts-grid">
-  <div class="chart-card">
-    <div class="chart-header">
-      <h2><i class="fas fa-bolt"></i> Moc czynna</h2>
-      <div class="chart-controls">
-        <button class="btn-chart active">1H</button>
-        <button class="btn-chart">6H</button>
-        <button class="btn-chart">24H</button>
-      </div>
-    </div>
-    <div class="chart-container">
-      <canvas id="powerChart"></canvas>
-    </div>
-  </div>
-
-  <div class="chart-card">
-    <div class="chart-header">
-      <h2><i class="fas fa-plug"></i> Napięcie</h2>
-      <div class="chart-controls">
-        <button class="btn-chart active">1H</button>
-        <button class="btn-chart">6H</button>
-        <button class="btn-chart">24H</button>
-      </div>
-    </div>
-    <div class="chart-container">
-      <canvas id="voltageChart"></canvas>
-    </div>
-  </div>
-</div>
-
-<!-- Data Table -->
 <div class="data-table">
   <div class="table-header">
-    <h2><i class="fas fa-table"></i> Ostatnie 20 pomiarów</h2>
+    <h2><i class="fas fa-table"></i> Ostatnie 10 pomiarów</h2>
   </div>
   <table id="dataTable">
     <thead>
@@ -360,158 +285,25 @@
         <th>Napięcie (V)</th>
         <th>Prąd (A)</th>
         <th>Moc (W)</th>
-        <th>Energia</th>
-        <th>Częst. (Hz)</th>
         <th>PF</th>
       </tr>
     </thead>
     <tbody>
-      {% for d in data_qs|slice:"-20:" %}
+      {% for d in last_10_readings %}
       <tr>
         <td>{{ d.timestamp|date:"Y-m-d H:i:s" }}</td>
-        <td class="value-cell">{{ d.voltage|floatformat:1 }}</td>
-        <td class="value-cell">{{ d.current|floatformat:2 }}</td>
-        <td class="value-cell">{{ d.power|floatformat:1 }}</td>
-        <td class="value-cell">{{ d.energy|floatformat:2 }}</td>
-        <td class="value-cell">{{ d.frequency|floatformat:1 }}</td>
-        <td class="value-cell">{{ d.pf|floatformat:2 }}</td>
+        <td class="value-cell">{{ d.voltage|floatformat:1|default:"-" }}</td>
+        <td class="value-cell">{{ d.current|floatformat:2|default:"-" }}</td>
+        <td class="value-cell">{{ d.power|floatformat:1|default:"-" }}</td>
+        <td class="value-cell">{{ d.pf|floatformat:2|default:"-" }}</td>
+      </tr>
+      {% empty %}
+      <tr>
+        <td colspan="5" style="text-align: center; color: #94a3b8;">Brak danych historycznych.</td>
       </tr>
       {% endfor %}
     </tbody>
   </table>
 </div>
 
-<script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
-<script>
-  const timestamps = {{ timestamps|safe }};
-  const powerData = {{ powers|safe }};
-  const voltageData = {{ voltages|safe }};
-
-  // Chart.js dark theme config
-  const chartConfig = {
-    responsive: true,
-    maintainAspectRatio: false,
-    plugins: {
-      legend: {
-        display: false
-      },
-      tooltip: {
-        backgroundColor: 'rgba(15, 23, 42, 0.9)',
-        titleColor: '#f1f5f9',
-        bodyColor: '#94a3b8',
-        borderColor: '#334155',
-        borderWidth: 1,
-        padding: 12,
-        displayColors: false
-      }
-    },
-    scales: {
-      x: {
-        grid: {
-          color: '#334155',
-          drawBorder: false
-        },
-        ticks: {
-          color: '#94a3b8',
-          maxRotation: 45,
-          minRotation: 45
-        }
-      },
-      y: {
-        grid: {
-          color: '#334155',
-          drawBorder: false
-        },
-        ticks: {
-          color: '#94a3b8'
-        }
-      }
-    }
-  };
-
-  // Power Chart
-  const powerCtx = document.getElementById('powerChart').getContext('2d');
-  const powerChart = new Chart(powerCtx, {
-    type: 'line',
-    data: {
-      labels: timestamps.slice(-20),
-      datasets: [{
-        label: 'Moc (W)',
-        data: powerData.slice(-20),
-        borderColor: '#3b82f6',
-        backgroundColor: 'rgba(59, 130, 246, 0.1)',
-        borderWidth: 2,
-        fill: true,
-        tension: 0.4,
-        pointRadius: 3,
-        pointHoverRadius: 6,
-        pointBackgroundColor: '#3b82f6'
-      }]
-    },
-    options: chartConfig
-  });
-
-  // Voltage Chart
-  const voltageCtx = document.getElementById('voltageChart').getContext('2d');
-  const voltageChart = new Chart(voltageCtx, {
-    type: 'line',
-    data: {
-      labels: timestamps.slice(-20),
-      datasets: [{
-        label: 'Napięcie (V)',
-        data: voltageData.slice(-20),
-        borderColor: '#10b981',
-        backgroundColor: 'rgba(16, 185, 129, 0.1)',
-        borderWidth: 2,
-        fill: true,
-        tension: 0.4,
-        pointRadius: 3,
-        pointHoverRadius: 6,
-        pointBackgroundColor: '#10b981'
-      }]
-    },
-    options: chartConfig
-  });
-
-  // Auto-refresh
-  async function fetchAndUpdate() {
-    try {
-      const resp = await fetch("{% url 'sensor-data' sensor.id %}");
-      const data = await resp.json();
-      const slice20 = data.slice(-20);
-
-      const newTs = slice20.map(x => new Date(x.timestamp).toLocaleTimeString('pl-PL'));
-      const newP = slice20.map(x => x.power);
-      const newV = slice20.map(x => x.voltage);
-
-      powerChart.data.labels = newTs;
-      powerChart.data.datasets[0].data = newP;
-      powerChart.update('none');
-
-      voltageChart.data.labels = newTs;
-      voltageChart.data.datasets[0].data = newV;
-      voltageChart.update('none');
-
-      const tbody = document.querySelector('#dataTable tbody');
-      tbody.innerHTML = '';
-      slice20.forEach(d => {
-        tbody.insertAdjacentHTML('beforeend', `
-          <tr>
-            <td>${new Date(d.timestamp).toLocaleString('pl-PL')}</td>
-            <td class="value-cell">${d.voltage.toFixed(1)}</td>
-            <td class="value-cell">${d.current.toFixed(2)}</td>
-            <td class="value-cell">${d.power.toFixed(1)}</td>
-            <td class="value-cell">${d.energy.toFixed(2)}</td>
-            <td class="value-cell">${d.frequency.toFixed(1)}</td>
-            <td class="value-cell">${d.pf.toFixed(2)}</td>
-          </tr>
-        `);
-      });
-    } catch (error) {
-      console.error('Błąd aktualizacji:', error);
-    }
-  }
-
-  setInterval(fetchAndUpdate, 10000);
-</script>
 {% endblock %}

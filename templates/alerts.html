@@ -10,6 +10,8 @@
     align-items: center;
     margin-bottom: 2rem;
     animation: fadeIn 0.6s ease-out;
+    flex-wrap: wrap; /* Lepsze na mobilnych */
+    gap: 1rem;
   }
 
   .alerts-header h1 {
@@ -19,6 +21,28 @@
     align-items: center;
     gap: 1rem;
   }
+  
+  /* NOWY STYL DLA PRZYCISKU */
+  .btn-create {
+    background: linear-gradient(135deg, #3b82f6 0%, #2563eb 100%);
+    color: white;
+    border: none;
+    padding: 0.75rem 1.5rem;
+    border-radius: 0.75rem;
+    font-size: 1rem;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+  }
+  .btn-create:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(59, 130, 246, 0.4);
+  }
+  /* KONIEC NOWEGO STYLU */
 
   .filters {
     display: flex;
@@ -242,9 +266,12 @@
 {% block content %}
 <div class="alerts-header">
   <h1><i class="fas fa-bell"></i> Alerty i powiadomienia</h1>
+  
+  <a href="{% url 'alert_create' %}" class="btn-create">
+    <i class="fas fa-plus-circle"></i> Dodaj alert
+  </a>
 </div>
 
-<!-- Filtry -->
 <div class="filters">
   <div class="filter-group">
     <label>Typ</label>
@@ -278,7 +305,6 @@
   </div>
 </div>
 
-<!-- Lista alertów -->
 {% if alerts %}
 <div class="alerts-list">
   {% for alert in alerts %}

@@ -5,11 +5,19 @@ from django.http import HttpResponseForbidden, JsonResponse
 from django.shortcuts import render, get_object_or_404, redirect
 from django.contrib.auth.decorators import login_required
 from django.contrib.auth import login, authenticate
-from django.contrib.auth.forms import UserCreationForm
+from django.contrib.auth.models import User
 from django.contrib import messages
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
 from django.db.models import Avg, Max, Min, Count
+
+# POPRAWKA: Zaimportuj AlertForm
+try:
+    from .forms import CustomUserCreationForm, AlertForm
+except ImportError:
+    from django.contrib.auth.forms import UserCreationForm as CustomUserCreationForm
+    from .forms import AlertForm # Spróbuj ponownie
+
 
 from rest_framework import viewsets, status
 from rest_framework.response import Response
@@ -36,7 +44,8 @@ from .utils import (
     check_alerts,
     log_activity,
     get_comparison_data,
-    predict_monthly_cost
+    predict_monthly_cost,
+    calculate_energy_for_period
 )
 
 logger = logging.getLogger(__name__)
@@ -47,17 +56,17 @@ logger = logging.getLogger(__name__)
 def register(request):
     """Widok rejestracji nowego użytkownika"""
     if request.method == 'POST':
-        form = UserCreationForm(request.POST)
+        form = CustomUserCreationForm(request.POST)
         if form.is_valid():
             user = form.save()
             username = form.cleaned_data.get('username')
-            password = form.cleaned_data.get('password1')
+            password = form.cleaned_data.get('password2') 
 
-            # Utwórz ustawienia domyślne dla użytkownika
             UserSettings.objects.create(user=user)
 
             user = authenticate(username=username, password=password)
-            login(request, user)
+            if user is not None:
+                login(request, user)
 
             log_activity(
                 user=user,
@@ -71,10 +80,13 @@ def register(request):
             messages.success(request, f'Konto utworzone pomyślnie! Witaj {username}!')
             return redirect('dashboard')
         else:
-            for error in form.errors.values():
-                messages.error(request, error)
+            for field, errors in form.errors.items():
+                for error in errors:
+                    if field != 'password2': 
+                        messages.error(request, f"{error}")
     else:
-        form = UserCreationForm()
+        form = CustomUserCreationForm()
+    
     return render(request, 'login.html', {'form': form})
 
 
@@ -83,11 +95,7 @@ def profile(request):
     """Widok profilu użytkownika"""
     houses = House.objects.filter(user=request.user).prefetch_related('sensors')
     total_sensors = sum(house.sensors.count() for house in houses)
-
-    # Pobierz lub utwórz ustawienia
     settings, created = UserSettings.objects.get_or_create(user=request.user)
-
-    # Statystyki
     total_alerts = Alert.objects.filter(house__user=request.user).count()
     unread_alerts = Alert.objects.filter(house__user=request.user, is_read=False).count()
 
@@ -107,7 +115,6 @@ def settings_view(request):
     user_settings, created = UserSettings.objects.get_or_create(user=request.user)
 
     if request.method == 'POST':
-        # Aktualizuj ustawienia
         user_settings.theme = request.POST.get('theme', 'dark')
         user_settings.email_alerts = request.POST.get('email_alerts') == 'on'
         user_settings.alert_frequency = request.POST.get('alert_frequency', 'immediate')
@@ -116,7 +123,12 @@ def settings_view(request):
 
         monthly_goal = request.POST.get('monthly_goal_kwh')
         if monthly_goal:
-            user_settings.monthly_goal_kwh = float(monthly_goal)
+            try:
+                user_settings.monthly_goal_kwh = float(monthly_goal)
+            except (ValueError, TypeError):
+                user_settings.monthly_goal_kwh = None
+        else:
+            user_settings.monthly_goal_kwh = None
 
         user_settings.save()
 
@@ -155,13 +167,11 @@ def receive_sensor_readings(request):
                 logger.warning(f"Sensor {reading['sensor_id']} nie istnieje.")
                 continue
 
-            # Oblicz moc bierną
             reactive_power = calculate_reactive_power(
                 reading['power'],
                 reading['pf']
             )
 
-            # Zapisz dane
             sensor_data = SensorData.objects.create(
                 sensor=sensor,
                 timestamp=reading['timestamp'],
@@ -173,8 +183,6 @@ def receive_sensor_readings(request):
                 pf=reading['pf'],
                 reactive_power=reactive_power
             )
-
-            # Sprawdź alerty
             check_alerts(sensor, sensor_data)
 
         return Response({"status": "ok"}, status=status.HTTP_201_CREATED)
@@ -211,8 +219,6 @@ def add_sensor_data(request, sensor_id):
         pf=request.data['pf'],
         reactive_power=reactive_power
     )
-
-    # Sprawdź alerty
     check_alerts(sensor, sensor_data)
 
     return Response(SensorDataSerializer(sensor_data).data, status=status.HTTP_201_CREATED)
@@ -333,7 +339,13 @@ def sensor_data_view(request, sensor_id):
     sensor = get_object_or_404(Sensor, id=sensor_id)
     if sensor.house.user != request.user:
         return Response({'error': 'Brak dostępu'}, status=status.HTTP_403_FORBIDDEN)
-    qs = SensorData.objects.filter(sensor=sensor).order_by('timestamp')
+    
+    start_date = timezone.now() - timedelta(days=1)
+    qs = SensorData.objects.filter(
+        sensor=sensor, 
+        timestamp__gte=start_date
+    ).order_by('timestamp')
+    
     return Response(SensorDataSerializer(qs, many=True).data)
 
 
@@ -359,26 +371,35 @@ def live_data_view(request, sensor_id):
     })
 
 
-# CZĘŚĆ 2 - Dodaj to na końcu pliku views.py po CZĘŚCI 1
-
 # ========== WIDOKI HTML ==========
 
 @login_required
 def dashboard(request):
     """Główny dashboard użytkownika z kosztami miesięcznymi"""
-    houses = House.objects.filter(user=request.user).prefetch_related('sensors__data')
-
-    # Oblicz koszty dla każdego domu
+    houses = House.objects.filter(user=request.user).prefetch_related('sensors', 'sensors__data')
     now = timezone.now()
     start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+    all_sensors = Sensor.objects.filter(house__user=request.user)
+    total_sensors = all_sensors.count()
+    online_sensors = 0
+    last_reading_time = None
+
+    if total_sensors > 0:
+        latest_data = SensorData.objects.filter(sensor__house__user=request.user).order_by('-timestamp').first()
+        if latest_data:
+            last_reading_time = latest_data.timestamp
+        
+        for sensor in all_sensors:
+            if sensor.is_online:
+                online_sensors += 1
 
     houses_with_costs = []
     for house in houses:
         sensors_in_house = house.sensors.all()
-
         total_energy_wh = 0
         total_power_now = 0
-        sensor_count = 0
+        sensor_count_in_house = 0
 
         for sensor in sensors_in_house:
             monthly_data = SensorData.objects.filter(
@@ -390,22 +411,19 @@ def dashboard(request):
                 data_list = list(monthly_data)
                 for i in range(1, len(data_list)):
                     dt = (data_list[i].timestamp - data_list[i - 1].timestamp).total_seconds()
-                    power = float(data_list[i].power) if data_list[i].power else 0
-                    total_energy_wh += power * dt / 3600.0
+                    if dt > 0 and dt < 3600:
+                        power = float(data_list[i].power) if data_list[i].power else 0
+                        total_energy_wh += power * (dt / 3600.0)
 
-                last_reading = monthly_data.last()
-                if last_reading and last_reading.power:
-                    total_power_now += float(last_reading.power)
-
-                sensor_count += 1
+                last_reading_in_sensor = data_list[-1]
+                if last_reading_in_sensor and last_reading_in_sensor.power:
+                    if (now - last_reading_in_sensor.timestamp) < timedelta(minutes=5):
+                        total_power_now += float(last_reading_in_sensor.power)
+                sensor_count_in_house += 1
 
         total_energy_kwh = total_energy_wh / 1000.0
         monthly_cost = total_energy_kwh * house.price_per_kwh
-
-        # Predykcja końca miesiąca
         prediction = predict_monthly_cost(house)
-
-        # Porównanie z poprzednim miesiącem
         comparison = get_comparison_data(house, 'month')
 
         houses_with_costs.append({
@@ -413,12 +431,11 @@ def dashboard(request):
             'monthly_kwh': round(total_energy_kwh, 2),
             'monthly_cost': round(monthly_cost, 2),
             'current_power': round(total_power_now, 0),
-            'sensor_count': sensor_count,
+            'sensor_count': sensor_count_in_house,
             'prediction': prediction,
             'comparison': comparison,
         })
 
-    # Nieprzeczytane alerty
     unread_alerts = Alert.objects.filter(
         house__user=request.user,
         is_read=False
@@ -429,82 +446,101 @@ def dashboard(request):
         'houses_with_costs': houses_with_costs,
         'current_month': now.strftime('%B %Y'),
         'unread_alerts': unread_alerts,
+        'total_sensors': total_sensors,
+        'online_sensors': online_sensors,
+        'last_reading_time': last_reading_time,
     }
     return render(request, 'dashboard.html', context)
 
 
 @login_required
 def sensor_detail(request, sensor_id):
-    """Szczegółowy widok czujnika z wykresami"""
+    """
+    Przebudowany widok szczegółów czujnika.
+    Bez wykresów, skupiony na danych na żywo i podsumowaniach.
+    """
     sensor = get_object_or_404(Sensor, id=sensor_id)
     if sensor.house.user != request.user:
         return HttpResponseForbidden("Brak dostępu")
 
-    data_qs = SensorData.objects.filter(sensor=sensor).order_by('timestamp')
-
-    # Przygotowanie danych do wykresów
-    timestamps = [d.timestamp.strftime("%H:%M:%S") for d in data_qs]
-    voltages = [float(d.voltage) if d.voltage else 0 for d in data_qs]
-    currents = [float(d.current) if d.current else 0 for d in data_qs]
-    powers = [float(d.power) if d.power else 0 for d in data_qs]
-    reactive_powers = [float(d.reactive_power) if d.reactive_power else 0 for d in data_qs]
-
-    # Oblicz energię przez całkowanie mocy
-    energy_wh = []
-    data_list = list(data_qs)
-    for i in range(1, len(data_list)):
-        dt = (data_list[i].timestamp - data_list[i - 1].timestamp).total_seconds()
-        energy_wh.append(powers[i] * dt / 3600.0)
-
-    energy_times = [d.timestamp for d in data_list[1:]]
-
     now = timezone.now()
-    last_hour = now - timedelta(hours=1)
-    start_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_of_day = now.replace(hour=0, minute=0, second=0, microsecond=0)
+    start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    
+    price_per_kwh = sensor.house.price_per_kwh
 
-    # Agregacja energii
-    total_wh_last_hour = sum(e for t, e in zip(energy_times, energy_wh) if t >= last_hour)
-    total_wh_today = sum(e for t, e in zip(energy_times, energy_wh) if t >= start_day)
+    # 1. Oblicz zużycie dzienne
+    daily_kwh = calculate_energy_for_period(sensor.house, start_of_day, now, sensor_id=sensor.id)
+    daily_cost = daily_kwh * price_per_kwh
 
-    hourly_kwh = total_wh_last_hour / 1000.0
-    daily_kwh = total_wh_today / 1000.0
+    # 2. Oblicz zużycie miesięczne
+    monthly_kwh = calculate_energy_for_period(sensor.house, start_of_month, now, sensor_id=sensor.id)
+    monthly_cost = monthly_kwh * price_per_kwh
 
-    # Oblicz koszt energii
-    PRICE_PER_KWH = sensor.house.price_per_kwh
-    daily_cost = daily_kwh * PRICE_PER_KWH
-    hourly_cost = hourly_kwh * PRICE_PER_KWH
+    # 3. Pobierz ostatnie 10 pomiarów do tabeli
+    last_10_readings = SensorData.objects.filter(sensor=sensor).order_by('-timestamp')[:10]
+    
+    # 4. Pobierz średnią z ostatnich 5 pomiarów
+    recent_readings = SensorData.objects.filter(sensor=sensor).order_by('-timestamp')[:5]
+    avg_stats = recent_readings.aggregate(
+        power=Avg('power'),
+        voltage=Avg('voltage'),
+        current=Avg('current'),
+        pf=Avg('pf')
+    )
 
-    # Statystyki
-    if data_qs.exists():
-        stats = data_qs.aggregate(
-            avg_power=Avg('power'),
-            max_power=Max('power'),
-            min_power=Min('power'),
-            avg_voltage=Avg('voltage'),
-        )
-    else:
-        stats = {
-            'avg_power': 0,
-            'max_power': 0,
-            'min_power': 0,
-            'avg_voltage': 0,
-        }
+    # 5. Pobierz ustawienia odświeżania
+    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
 
     context = {
         'sensor': sensor,
-        'data_qs': data_qs,
-        'timestamps': timestamps,
-        'voltages': voltages,
-        'currents': currents,
-        'powers': powers,
-        'reactive_powers': reactive_powers,
-        'hourly_kwh': hourly_kwh,
+        'avg_stats': avg_stats, # Średnie dane
         'daily_kwh': daily_kwh,
         'daily_cost': daily_cost,
-        'hourly_cost': hourly_cost,
-        'stats': stats,
+        'monthly_kwh': monthly_kwh,
+        'monthly_cost': monthly_cost,
+        'last_10_readings': last_10_readings,
+        'refresh_interval': user_settings.live_refresh_interval,
     }
     return render(request, 'sensor_detail.html', context)
+
+
+# --- NOWY WIDOK DO TWORZENIA ALERTÓW ---
+@login_required
+def create_alert(request):
+    """Widok formularza do ręcznego tworzenia alertów."""
+    if request.method == 'POST':
+        # Przekaż zalogowanego użytkownika do formularza
+        form = AlertForm(request.POST, user=request.user)
+        if form.is_valid():
+            alert = form.save(commit=False)
+            # Domyślnie ustawiamy alert jako nierozwiązany
+            alert.is_resolved = False 
+            alert.save()
+            
+            # Zaloguj aktywność
+            log_activity(
+                user=request.user,
+                action='create',
+                model_name='Alert',
+                object_id=alert.id,
+                description=f"Ręcznie utworzono alert: {alert.message}",
+                request=request
+            )
+            
+            messages.success(request, 'Pomyślnie utworzono nowy alert.')
+            return redirect('alerts')
+        else:
+            messages.error(request, 'Formularz zawiera błędy. Popraw je.')
+    else:
+        # Przekaż użytkownika, aby formularz mógł filtrować domy
+        form = AlertForm(user=request.user)
+
+    context = {
+        'form': form
+    }
+    return render(request, 'alert_create.html', context)
+# --- KONIEC NOWEGO WIDOKU ---
 
 
 @login_required
@@ -512,7 +548,6 @@ def alerts_view(request):
     """Widok wszystkich alertów użytkownika"""
     alerts = Alert.objects.filter(house__user=request.user).order_by('-created_at')
 
-    # Filtrowanie
     filter_type = request.GET.get('type')
     filter_severity = request.GET.get('severity')
     filter_status = request.GET.get('status')
@@ -529,7 +564,7 @@ def alerts_view(request):
         alerts = alerts.filter(is_read=False, is_resolved=False)
 
     context = {
-        'alerts': alerts[:50],  # Limit do 50 najnowszych
+        'alerts': alerts[:50],
         'filter_type': filter_type,
         'filter_severity': filter_severity,
         'filter_status': filter_status,
@@ -542,62 +577,45 @@ def comparison_view(request, house_id):
     """Widok porównań i statystyk"""
     house = get_object_or_404(House, id=house_id, user=request.user)
 
-    # Porównania
     day_comparison = get_comparison_data(house, 'day')
     week_comparison = get_comparison_data(house, 'week')
     month_comparison = get_comparison_data(house, 'month')
-
-    # Predykcja
     prediction = predict_monthly_cost(house)
 
-    # Ranking czujników (które zużywają najwięcej)
     now = timezone.now()
     start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
     sensor_rankings = []
     for sensor in house.sensors.all():
-        data_list = list(
-            SensorData.objects.filter(
-                sensor=sensor,
-                timestamp__gte=start_of_month
-            ).order_by('timestamp')
-        )
-
-        total_kwh = 0
-        if len(data_list) > 1:
-            for i in range(1, len(data_list)):
-                dt = (data_list[i].timestamp - data_list[i - 1].timestamp).total_seconds()
-                power = float(data_list[i].power) if data_list[i].power else 0
-                total_kwh += power * dt / 3600000.0
-
+        total_kwh = calculate_energy_for_period(house, start_of_month, now, sensor_id=sensor.id)
         sensor_rankings.append({
             'sensor': sensor,
             'kwh': round(total_kwh, 2),
             'cost': round(total_kwh * house.price_per_kwh, 2)
         })
 
-    # Sortuj po zużyciu
     sensor_rankings.sort(key=lambda x: x['kwh'], reverse=True)
 
-    # Historia 12 miesięcy
     monthly_history = []
-    for i in range(12, 0, -1):
-        month_date = now - timedelta(days=30 * i)
-        month_start = month_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    current_month_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
-        if month_start.month == 12:
-            month_end = month_start.replace(year=month_start.year + 1, month=1, day=1)
+    for i in range(12):
+        if i == 0:
+            month_start = current_month_start
+            month_end = now
         else:
-            month_end = month_start.replace(month=month_start.month + 1, day=1)
+            month_end = current_month_start
+            month_start = (month_end - timedelta(days=1)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            current_month_start = month_start
 
-        from .utils import calculate_energy_for_period
         month_kwh = calculate_energy_for_period(house, month_start, month_end)
-
         monthly_history.append({
             'month': month_start.strftime('%b %Y'),
             'kwh': round(month_kwh, 2),
             'cost': round(month_kwh * house.price_per_kwh, 2)
         })
+
+    monthly_history.reverse()
 
     context = {
         'house': house,
@@ -611,21 +629,7 @@ def comparison_view(request, house_id):
     return render(request, 'comparison.html', context)
 
 
-@login_required
-def live_widget_view(request, sensor_id):
-    """Widget czasu rzeczywistego"""
-    sensor = get_object_or_404(Sensor, id=sensor_id)
-    if sensor.house.user != request.user:
-        return HttpResponseForbidden("Brak dostępu")
-
-    # Pobierz ustawienia użytkownika
-    user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
-
-    context = {
-        'sensor': sensor,
-        'refresh_interval': user_settings.live_refresh_interval,
-    }
-    return render(request, 'live_widget.html', context)
+# Usunięto widok live_widget_view
 
 
 @login_required
@@ -633,21 +637,17 @@ def admin_dashboard(request):
     """Dashboard dla administratorów"""
     if not request.user.is_staff:
         return HttpResponseForbidden("Brak dostępu")
-
-    # Statystyki ogólne
+    
     total_users = User.objects.count()
     total_houses = House.objects.count()
     total_sensors = Sensor.objects.count()
     online_sensors = sum(1 for s in Sensor.objects.all() if s.is_online)
 
-    # Alerty nieprzeczytane
     unread_alerts = Alert.objects.filter(is_read=False).count()
     critical_alerts = Alert.objects.filter(severity='critical', is_resolved=False).count()
 
-    # Ostatnia aktywność
     recent_activity = ActivityLog.objects.all().order_by('-created_at')[:20]
 
-    # Top użytkownicy według zużycia
     now = timezone.now()
     start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
 
@@ -657,7 +657,6 @@ def admin_dashboard(request):
         total_kwh = 0
 
         for house in houses:
-            from .utils import calculate_energy_for_period
             total_kwh += calculate_energy_for_period(house, start_of_month, now)
 
         if total_kwh > 0:

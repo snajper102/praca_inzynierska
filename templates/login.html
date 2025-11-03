@@ -139,6 +139,12 @@
       margin-bottom: 0.5rem;
       font-size: 0.9rem;
     }
+    
+    .form-group .helptext {
+      font-size: 0.8rem;
+      color: #94a3b8;
+      margin-top: 0.25rem;
+    }
 
     .input-wrapper {
       position: relative;
@@ -162,6 +168,11 @@
       color: #f1f5f9;
       font-size: 1rem;
       transition: all 0.3s ease;
+    }
+    
+    /* Dostosowanie dla pól formularza rejestracji (które nie mają ikonek) */
+    .form-container.register .form-control {
+        padding: 0.875rem 1rem;
     }
 
     .form-control:focus {
@@ -209,7 +220,14 @@
       display: flex;
       align-items: center;
       gap: 0.75rem;
+      font-size: 0.9rem;
       animation: shake 0.5s ease-in-out;
+    }
+    
+    .error-message ul {
+        list-style-type: none;
+        padding-left: 0;
+        margin: 0;
     }
 
     @keyframes shake {
@@ -271,18 +289,28 @@
       <p>System monitorowania energii</p>
     </div>
 
+    {% if messages %}
+      {% for message in messages %}
+        {% if 'register' in request.path %} <div class="error-message">
+            <i class="fas fa-exclamation-circle"></i>
+            <span>{{ message }}</span>
+          </div>
+        {% endif %}
+      {% endfor %}
+    {% endif %}
+
     <div class="tabs">
-      <button class="tab active" onclick="switchTab('login')">
+      <button class="tab {% if 'register' not in request.path %}active{% endif %}" onclick="switchTab('login')">
         <i class="fas fa-sign-in-alt"></i> Logowanie
       </button>
-      <button class="tab" onclick="switchTab('register')">
+      <button class="tab {% if 'register' in request.path %}active{% endif %}" onclick="switchTab('register')">
         <i class="fas fa-user-plus"></i> Rejestracja
       </button>
     </div>
 
-    <!-- Login Form -->
-    <div id="loginForm" class="form-container active">
-      {% if form.errors %}
+    <div id="loginForm" class="form-container {% if 'register' not in request.path %}active{% endif %}">
+      
+      {% if form.errors and 'login' in request.path %}
       <div class="error-message">
         <i class="fas fa-exclamation-circle"></i>
         <span>Nieprawidłowa nazwa użytkownika lub hasło</span>
@@ -317,41 +345,22 @@
       </div>
     </div>
 
-    <!-- Register Form -->
-    <div id="registerForm" class="form-container">
-      <form method="post" action="/register/">
+    <div id="registerForm" class="form-container register {% if 'register' in request.path %}active{% endif %}">
+      
+      <form method="post" action="{% url 'register' %}">
         {% csrf_token %}
+        
+        {% for field in form %}
         <div class="form-group">
-          <label for="reg_username">Nazwa użytkownika</label>
-          <div class="input-wrapper">
-            <i class="fas fa-user"></i>
-            <input type="text" id="reg_username" name="username" class="form-control" placeholder="Wybierz nazwę użytkownika" required>
-          </div>
+          <label for="{{ field.id_for_label }}">{{ field.label }}</label>
+          {{ field }} {% if field.help_text %}
+            <p class="helptext">{{ field.help_text|safe }}</p>
+          {% endif %}
+          {% for error in field.errors %}
+            <div class="error-message" style="margin-top: 0.5rem; padding: 0.5rem;">{{ error }}</div>
+          {% endfor %}
         </div>
-
-        <div class="form-group">
-          <label for="reg_email">Email</label>
-          <div class="input-wrapper">
-            <i class="fas fa-envelope"></i>
-            <input type="email" id="reg_email" name="email" class="form-control" placeholder="twoj@email.com" required>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="reg_password1">Hasło</label>
-          <div class="input-wrapper">
-            <i class="fas fa-lock"></i>
-            <input type="password" id="reg_password1" name="password1" class="form-control" placeholder="Minimum 8 znaków" required>
-          </div>
-        </div>
-
-        <div class="form-group">
-          <label for="reg_password2">Potwierdź hasło</label>
-          <div class="input-wrapper">
-            <i class="fas fa-lock"></i>
-            <input type="password" id="reg_password2" name="password2" class="form-control" placeholder="Powtórz hasło" required>
-          </div>
-        </div>
+        {% endfor %}
 
         <button type="submit" class="btn-submit">
           <i class="fas fa-user-plus"></i> Zarejestruj się
@@ -361,17 +370,27 @@
   </div>
 
   <script>
+    const loginForm = document.getElementById('loginForm');
+    const registerForm = document.getElementById('registerForm');
+    
     function switchTab(tab) {
-      // Update tabs
-      document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
-      event.target.closest('.tab').classList.add('active');
-
-      // Update forms
-      document.querySelectorAll('.form-container').forEach(f => f.classList.remove('active'));
+      const loginTab = document.querySelector('.tab[onclick*="login"]');
+      const registerTab = document.querySelector('.tab[onclick*="register"]');
+      
       if (tab === 'login') {
-        document.getElementById('loginForm').classList.add('active');
+        loginTab.classList.add('active');
+        registerTab.classList.remove('active');
+        loginForm.classList.add('active');
+        registerForm.classList.remove('active');
+        // Zmień URL w pasku przeglądarki bez przeładowania
+        window.history.pushState({}, '', '{% url "login" %}');
       } else {
-        document.getElementById('registerForm').classList.add('active');
+        loginTab.classList.remove('active');
+        registerTab.classList.add('active');
+        loginForm.classList.remove('active');
+        registerForm.classList.add('active');
+        // Zmień URL w pasku przeglądarki bez przeładowania
+        window.history.pushState({}, '', '{% url "register" %}');
       }
     }
   </script>

@@ -1,9 +1,16 @@
 import hmac
 import hashlib
+import math
+from datetime import timedelta
+from calendar import monthrange
+
 from django.conf import settings
 from django.core.mail import send_mail
 from django.utils import timezone
-from .models import Alert, ActivityLog
+from .models import Alert, ActivityLog, SensorData, Sensor # Importuj Sensor
+import logging
+
+logger = logging.getLogger(__name__)
 
 
 def sign_data(value, timestamp):
@@ -22,87 +29,144 @@ def verify_signature(value, timestamp, signature):
 
 def calculate_reactive_power(power, pf):
     """
-    Oblicza moc bierną Q [VAR] na podstawie mocy czynnej P i współczynnika mocy PF
-
-    Q = sqrt(S² - P²)
-    gdzie S = P / PF (moc pozorna)
+    Oblicza moc bierną Q [VAR]
     """
-    if pf == 0 or power == 0:
-        return 0
+    if pf is None or pf == 0 or power is None or power == 0:
+        return 0.0
+    if pf == 1.0:
+        return 0.0
+        
     try:
+        argument = 1 - (pf * pf)
+        if argument < 0: # Zabezpieczenie przed błędami float
+            argument = 0
+            
         S = power / pf  # Moc pozorna [VA]
-        Q = (S ** 2 - power ** 2) ** 0.5  # Moc bierna [VAR]
+        Q = S * math.sqrt(argument)
         return round(Q, 2)
-    except:
-        return 0
+    except (ValueError, OverflowError, ZeroDivisionError):
+        return 0.0
 
 
 def check_alerts(sensor, sensor_data):
     """
-    Sprawdza czy należy utworzyć alert dla danego pomiaru
+    Sprawdza alerty czasu rzeczywistego (dla przychodzących danych).
     """
-    from datetime import timedelta
-
     alerts_created = []
+    now = timezone.now()
 
-    # 1. Alert przekroczenia mocy
-    if sensor.power_threshold and sensor_data.power:
-        if sensor_data.power > sensor.power_threshold:
-            # Sprawdź czy nie było już alertu w ostatnich 10 minutach
-            recent_alert = Alert.objects.filter(
+    # 1. Alert przekroczenia mocy (z progu w modelu)
+    if sensor.power_threshold and sensor_data.power and sensor_data.power > sensor.power_threshold:
+        if not Alert.objects.filter(
+            sensor=sensor,
+            alert_type='power_high',
+            is_resolved=False, # Szukamy nierozwiązanego
+            created_at__gte=now - timedelta(minutes=10)
+        ).exists():
+            alert = Alert.objects.create(
+                house=sensor.house, sensor=sensor,
+                alert_type='power_high', severity='warning',
+                message=f"Czujnik '{sensor.name}' przekroczył próg mocy!",
+                value=sensor_data.power, threshold=sensor.power_threshold
+            )
+            alerts_created.append(alert)
+    
+    # 2. Alert anomalii napięcia (z progów w modelu)
+    voltage_alert_message = None
+    threshold = None
+    
+    if sensor.voltage_min_threshold and sensor_data.voltage and sensor_data.voltage < sensor.voltage_min_threshold:
+        voltage_alert_message = f"Napięcie spadło poniżej progu: {sensor_data.voltage:.1f} V"
+        threshold = sensor.voltage_min_threshold
+        
+    if sensor.voltage_max_threshold and sensor_data.voltage and sensor_data.voltage > sensor.voltage_max_threshold:
+        voltage_alert_message = f"Napięcie przekroczyło próg: {sensor_data.voltage:.1f} V"
+        threshold = sensor.voltage_max_threshold
+
+    if voltage_alert_message:
+        if not Alert.objects.filter(
+            sensor=sensor,
+            alert_type='voltage_anomaly',
+            is_resolved=False, # Szukamy nierozwiązanego
+            created_at__gte=now - timedelta(minutes=60) # Rzadziej, co godzinę
+        ).exists():
+            alert = Alert.objects.create(
+                house=sensor.house, sensor=sensor,
+                alert_type='voltage_anomaly', severity='critical',
+                message=f"Anomalia napięcia na '{sensor.name}': {voltage_alert_message}",
+                value=sensor_data.voltage, threshold=threshold
+            )
+            alerts_created.append(alert)
+
+    #
+    # --- NOWA REGUŁA: Alert przekroczenia prądu (Twoja prośba) ---
+    #
+    if sensor.current_max_threshold and sensor_data.current and sensor_data.current > sensor.current_max_threshold:
+        if not Alert.objects.filter(
+            sensor=sensor,
+            alert_type='current_high',
+            is_resolved=False,
+            created_at__gte=now - timedelta(minutes=10) # Co 10 minut
+        ).exists():
+            alert = Alert.objects.create(
+                house=sensor.house, sensor=sensor,
+                alert_type='current_high',
+                severity='critical', # Tak jak prosiłeś
+                message=f"KRYTYCZNE: Czujnik '{sensor.name}' przekroczył próg prądu!",
+                value=sensor_data.current,
+                threshold=sensor.current_max_threshold
+            )
+            alerts_created.append(alert)
+    # --- KONIEC NOWEJ REGUŁY ---
+
+
+    # 4. Alert "Czujnik Wrócił Online"
+    last_two = sensor.data.order_by('-timestamp')[:2]
+    if len(last_two) == 2:
+        time_diff = last_two[0].timestamp - last_two[1].timestamp
+        
+        if time_diff.total_seconds() > sensor.offline_threshold_seconds:
+            # Rozwiąż stary alert "offline", jeśli istniał
+            Alert.objects.filter(
                 sensor=sensor,
-                alert_type='power_high',
-                created_at__gte=timezone.now() - timedelta(minutes=10)
-            ).exists()
+                alert_type='sensor_offline',
+                is_resolved=False
+            ).update(is_resolved=True, is_read=True)
 
-            if not recent_alert:
+            # Stwórz nowy alert "online"
+            if not Alert.objects.filter(
+                sensor=sensor,
+                alert_type='sensor_online',
+                created_at__gte=now - timedelta(minutes=10)
+            ).exists():
                 alert = Alert.objects.create(
-                    house=sensor.house,
-                    sensor=sensor,
-                    alert_type='power_high',
-                    severity='warning',
-                    message=f"Czujnik '{sensor.name}' przekroczył próg mocy!",
-                    value=sensor_data.power,
-                    threshold=sensor.power_threshold
+                    house=sensor.house, sensor=sensor,
+                    alert_type='sensor_online', severity='info',
+                    message=f"Czujnik '{sensor.name}' wznowił wysyłanie danych po przerwie."
                 )
                 alerts_created.append(alert)
 
-    # 2. Alert limitu miesięcznego
+
+    # 5. Alert limitu miesięcznego
     if sensor.house.monthly_limit_kwh:
-        from django.db.models import Sum
-        start_of_month = timezone.now().replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-        # Oblicz zużycie w miesiącu
-        monthly_energy = 0
-        for s in sensor.house.sensors.all():
-            data_list = list(s.data.filter(timestamp__gte=start_of_month).order_by('timestamp'))
-            if len(data_list) > 1:
-                for i in range(1, len(data_list)):
-                    dt = (data_list[i].timestamp - data_list[i - 1].timestamp).total_seconds()
-                    power = float(data_list[i].power) if data_list[i].power else 0
-                    monthly_energy += power * dt / 3600000.0  # kWh
-
-        if monthly_energy > sensor.house.monthly_limit_kwh:
-            # Sprawdź czy nie było już alertu dziś
-            recent_alert = Alert.objects.filter(
-                house=sensor.house,
-                alert_type='monthly_limit',
-                created_at__gte=timezone.now().replace(hour=0, minute=0, second=0)
-            ).exists()
-
-            if not recent_alert:
+        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        
+        if not Alert.objects.filter(
+            house=sensor.house,
+            alert_type='monthly_limit',
+            created_at__gte=start_of_month
+        ).exists():
+            
+            monthly_energy = calculate_energy_for_period(sensor.house, start_of_month, now)
+            if monthly_energy > sensor.house.monthly_limit_kwh:
                 alert = Alert.objects.create(
-                    house=sensor.house,
-                    sensor=None,
-                    alert_type='monthly_limit',
-                    severity='critical',
+                    house=sensor.house, sensor=None,
+                    alert_type='monthly_limit', severity='critical',
                     message=f"Dom '{sensor.house.name}' przekroczył miesięczny limit zużycia!",
-                    value=monthly_energy,
-                    threshold=sensor.house.monthly_limit_kwh
+                    value=monthly_energy, threshold=sensor.house.monthly_limit_kwh
                 )
                 alerts_created.append(alert)
-
-    # Wyślij email jeśli są nowe alerty
+    
     if alerts_created:
         send_alert_email(alerts_created)
 
@@ -123,12 +187,9 @@ def send_alert_email(alerts):
         return
 
     subject = f"⚠️ Alerty - {house.name}"
-
     message_lines = [
-        f"Witaj {house.user.username},",
-        "",
-        f"Mamy nowe alerty dla domu '{house.name}':",
-        ""
+        f"Witaj {house.user.username},", "",
+        f"Mamy nowe alerty dla domu '{house.name}':", ""
     ]
 
     for alert in alerts:
@@ -138,28 +199,22 @@ def send_alert_email(alerts):
         message_lines.append("")
 
     message_lines.extend([
-        "Zaloguj się do systemu aby zobaczyć szczegóły.",
-        "",
-        "---",
-        "Energy Monitor System"
+        "Zaloguj się do systemu aby zobaczyć szczegóły.", "",
+        "---", "Energy Monitor System"
     ])
-
     message = "\n".join(message_lines)
 
     try:
         send_mail(
-            subject,
-            message,
-            settings.DEFAULT_FROM_EMAIL,
-            [email],
-            fail_silently=True,
+            subject, message,
+            settings.DEFAULT_FROM_EMAIL, [email],
+            fail_silently=False,
         )
-        # Oznacz alerty jako wysłane
         for alert in alerts:
             alert.email_sent = True
             alert.save(update_fields=['email_sent'])
     except Exception as e:
-        print(f"Błąd wysyłania emaila: {e}")
+        logger.error(f"Błąd wysyłania emaila: {e}")
 
 
 def log_activity(user, action, model_name, object_id, description, request=None):
@@ -184,15 +239,44 @@ def log_activity(user, action, model_name, object_id, description, request=None)
     )
 
 
+def calculate_energy_for_period(house, start_time, end_time, sensor_id=None):
+    """
+    Oblicza całkowitą energię (kWh) dla domu w danym okresie.
+    """
+    total_kwh = 0
+    
+    if sensor_id:
+        sensors_query = house.sensors.filter(id=sensor_id)
+    else:
+        sensors_query = house.sensors.all()
+
+    for sensor in sensors_query:
+        data_list = list(
+            SensorData.objects.filter(
+                sensor=sensor,
+                timestamp__gte=start_time,
+                timestamp__lt=end_time
+            ).order_by('timestamp')
+        )
+
+        sensor_wh = 0
+        if len(data_list) > 1:
+            for i in range(1, len(data_list)):
+                dt_seconds = (data_list[i].timestamp - data_list[i - 1].timestamp).total_seconds()
+                
+                if dt_seconds > 0 and dt_seconds < (sensor.offline_threshold_seconds + 60):
+                    power = float(data_list[i].power) if data_list[i].power else 0
+                    sensor_wh += power * (dt_seconds / 3600.0)
+        
+        total_kwh += sensor_wh / 1000.0
+
+    return total_kwh
+
+
 def get_comparison_data(house, period='month'):
     """
     Porównuje zużycie energii między okresami
-
-    period: 'day', 'week', 'month'
     """
-    from datetime import timedelta
-    from django.db.models import Avg, Sum
-
     now = timezone.now()
 
     if period == 'day':
@@ -200,29 +284,24 @@ def get_comparison_data(house, period='month'):
         previous_start = current_start - timedelta(days=1)
         previous_end = current_start
     elif period == 'week':
-        current_start = now - timedelta(days=now.weekday())
-        current_start = current_start.replace(hour=0, minute=0, second=0, microsecond=0)
+        current_start = (now - timedelta(days=now.weekday())).replace(hour=0, minute=0, second=0, microsecond=0)
         previous_start = current_start - timedelta(weeks=1)
         previous_end = current_start
     else:  # month
         current_start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-        if now.month == 1:
-            previous_start = now.replace(year=now.year - 1, month=12, day=1, hour=0, minute=0, second=0, microsecond=0)
-        else:
-            previous_start = now.replace(month=now.month - 1, day=1, hour=0, minute=0, second=0, microsecond=0)
+        prev_month_day = current_start - timedelta(days=1)
+        previous_start = prev_month_day.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         previous_end = current_start
 
-    # Oblicz zużycie dla bieżącego okresu
     current_kwh = calculate_energy_for_period(house, current_start, now)
-
-    # Oblicz zużycie dla poprzedniego okresu
     previous_kwh = calculate_energy_for_period(house, previous_start, previous_end)
 
-    # Oblicz różnicę
     if previous_kwh > 0:
         change_percent = ((current_kwh - previous_kwh) / previous_kwh) * 100
+    elif current_kwh > 0:
+        change_percent = 100.0
     else:
-        change_percent = 0
+        change_percent = 0.0
 
     return {
         'current': current_kwh,
@@ -232,62 +311,29 @@ def get_comparison_data(house, period='month'):
     }
 
 
-def calculate_energy_for_period(house, start_time, end_time):
-    """
-    Oblicza całkowitą energię dla domu w danym okresie
-    """
-    from .models import SensorData
-
-    total_kwh = 0
-
-    for sensor in house.sensors.all():
-        data_list = list(
-            SensorData.objects.filter(
-                sensor=sensor,
-                timestamp__gte=start_time,
-                timestamp__lte=end_time
-            ).order_by('timestamp')
-        )
-
-        if len(data_list) > 1:
-            for i in range(1, len(data_list)):
-                dt = (data_list[i].timestamp - data_list[i - 1].timestamp).total_seconds()
-                power = float(data_list[i].power) if data_list[i].power else 0
-                total_kwh += power * dt / 3600000.0  # kWh
-
-    return total_kwh
-
-
 def predict_monthly_cost(house):
     """
-    Przewiduje koszt na koniec miesiąca na podstawie dotychczasowego zużycia
+    Przewiduje koszt na koniec miesiąca
     """
-    from datetime import datetime
-
     now = timezone.now()
     start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    days_in_month = monthrange(now.year, now.month)[1]
+    
+    progress_of_month = (now.day - 1 + (now.hour / 24.0) + (now.minute / (24.0 * 60.0))) / days_in_month
 
-    # Ile dni minęło w miesiącu
-    days_passed = (now - start_of_month).days + 1
+    if progress_of_month == 0:
+        return {
+            'current_kwh': 0, 'predicted_kwh': 0, 'predicted_cost': 0,
+            'days_passed': 0, 'days_remaining': days_in_month, 'daily_average': 0
+        }
 
-    # Ile dni w miesiącu
-    if now.month == 12:
-        next_month = now.replace(year=now.year + 1, month=1, day=1)
-    else:
-        next_month = now.replace(month=now.month + 1, day=1)
-    days_in_month = (next_month - start_of_month).days
-
-    # Zużycie do tej pory
     current_kwh = calculate_energy_for_period(house, start_of_month, now)
-
-    # Przewidywane zużycie na koniec miesiąca
-    if days_passed > 0:
-        daily_avg = current_kwh / days_passed
-        predicted_kwh = daily_avg * days_in_month
-        predicted_cost = predicted_kwh * house.price_per_kwh
-    else:
-        predicted_kwh = 0
-        predicted_cost = 0
+    
+    predicted_kwh = current_kwh / progress_of_month
+    predicted_cost = predicted_kwh * house.price_per_kwh
+    
+    days_passed = (now - start_of_month).total_seconds() / (24 * 3600.0)
+    daily_avg = current_kwh / days_passed if days_passed > 0 else 0
 
     return {
         'current_kwh': current_kwh,
@@ -295,5 +341,5 @@ def predict_monthly_cost(house):
         'predicted_cost': predicted_cost,
         'days_passed': days_passed,
         'days_remaining': days_in_month - days_passed,
-        'daily_average': current_kwh / days_passed if days_passed > 0 else 0
+        'daily_average': daily_avg
     }

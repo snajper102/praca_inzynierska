@@ -3,6 +3,7 @@ from django.utils.html import format_html
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from .models import House, Sensor, SensorData, Alert, UserSettings, ActivityLog
+from django.db.models import Avg, Max
 
 
 class SensorDataInline(admin.TabularInline):
@@ -10,20 +11,30 @@ class SensorDataInline(admin.TabularInline):
     model = SensorData
     extra = 0
     fields = ('timestamp', 'voltage', 'current', 'power', 'energy', 'frequency', 'pf', 'reactive_power')
-    readonly_fields = ('timestamp', 'reactive_power')
+    
+    # --- POPRAWKA BŁĘDU 'TooManyFieldsSent' ---
+    # Ustawiamy wszystkie pola jako tylko do odczytu.
+    # To zatrzyma renderowanie tysięcy pól formularza.
+    readonly_fields = ('timestamp', 'voltage', 'current', 'power', 'energy', 'frequency', 'pf', 'reactive_power')
+    # --- KONIEC POPRAWKI ---
+    
     can_delete = False
-    max_num = 10
+    max_num = 10 # Pokaż tylko 10 ostatnich
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.order_by('-timestamp')[:10]
+        # Zostawiamy order_by, ale usuwamy slice [:10], który powodował błąd TypeError
+        return qs.order_by('-timestamp')
 
 
 class SensorInline(admin.TabularInline):
     """Inline dla czujników"""
     model = Sensor
     extra = 1
-    fields = ('sensor_id', 'name', 'location', 'is_active', 'power_threshold')
+    # Dodajemy nowe pola reguł
+    fields = ('sensor_id', 'name', 'location', 'is_active', 'power_threshold', 
+              'current_max_threshold', 'voltage_min_threshold', 'voltage_max_threshold', 
+              'offline_threshold_seconds')
     readonly_fields = ()
 
 
@@ -108,15 +119,12 @@ class HouseAdmin(admin.ModelAdmin):
         from datetime import timedelta
         now = timezone.now()
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
-
-        total_kwh = 0
-        for sensor in obj.sensors.all():
-            data = SensorData.objects.filter(sensor=sensor, timestamp__gte=start).order_by('timestamp')
-            if len(data) > 1:
-                for i in range(1, len(data)):
-                    dt = (data[i].timestamp - data[i - 1].timestamp).total_seconds()
-                    power = float(data[i].power) if data[i].power else 0
-                    total_kwh += power * dt / 3600000.0
+        
+        try:
+            from .utils import calculate_energy_for_period
+            total_kwh = calculate_energy_for_period(obj, start, now)
+        except ImportError:
+            total_kwh = 0
 
         cost = total_kwh * obj.price_per_kwh
         return format_html(
@@ -129,9 +137,10 @@ class HouseAdmin(admin.ModelAdmin):
     def get_current_power(self, obj):
         total_power = 0
         for sensor in obj.sensors.all():
-            last = sensor.data.order_by('-timestamp').first()
-            if last and last.power:
-                total_power += float(last.power)
+            if sensor.is_online:
+                last = sensor.data.order_by('-timestamp').first()
+                if last and last.power:
+                    total_power += float(last.power)
         return format_html('<strong>{:.0f} W</strong>', total_power)
 
     get_current_power.short_description = 'Aktualna moc'
@@ -161,8 +170,14 @@ class SensorAdmin(admin.ModelAdmin):
         ('Lokalizacja i wygląd', {
             'fields': ('location', 'icon', 'color')
         }),
-        ('Alerty', {
-            'fields': ('power_threshold',)
+        # Dodajemy pola reguł
+        ('Alerty (Reguły)', {
+            'fields': (
+                'power_threshold', 
+                'current_max_threshold',
+                ('voltage_min_threshold', 'voltage_max_threshold'),
+                'offline_threshold_seconds'
+            )
         }),
         ('Status', {
             'fields': ('is_active',)
@@ -190,7 +205,7 @@ class SensorAdmin(admin.ModelAdmin):
 
     def current_power(self, obj):
         last = obj.data.order_by('-timestamp').first()
-        if last and last.power:
+        if last and last.power and obj.is_online:
             return format_html('<strong>{:.1f} W</strong>', last.power)
         return '-'
 
@@ -223,10 +238,10 @@ class SensorAdmin(admin.ModelAdmin):
 
         data_24h = obj.data.filter(timestamp__gte=day_ago)
         count = data_24h.count()
-
-        if count > 0:
-            avg_power = sum(float(d.power or 0) for d in data_24h) / count
-            max_power = max(float(d.power or 0) for d in data_24h)
+        
+        if count > 1:
+            avg_power = data_24h.aggregate(avg=Avg('power'))['avg'] or 0
+            max_power = data_24h.aggregate(max=Max('power'))['max'] or 0
             return format_html(
                 '<strong>Pomiary 24h:</strong> {}<br>'
                 '<strong>Śr. moc:</strong> {:.1f} W<br>'
@@ -236,42 +251,6 @@ class SensorAdmin(admin.ModelAdmin):
         return 'Brak danych z ostatnich 24h'
 
     get_statistics.short_description = 'Statystyki 24h'
-
-
-@admin.register(SensorData)
-class SensorDataAdmin(admin.ModelAdmin):
-    list_display = (
-        'sensor',
-        'timestamp',
-        'voltage',
-        'current',
-        'power',
-        'reactive_power',
-        'energy',
-        'frequency',
-        'pf'
-    )
-    list_filter = ('sensor', 'timestamp')
-    search_fields = ('sensor__sensor_id', 'sensor__name')
-    readonly_fields = ('timestamp', 'reactive_power')
-    date_hierarchy = 'timestamp'
-
-    fieldsets = (
-        ('Czujnik', {
-            'fields': ('sensor', 'timestamp')
-        }),
-        ('Parametry elektryczne', {
-            'fields': (
-                ('voltage', 'current'),
-                ('power', 'reactive_power'),
-                ('frequency', 'pf'),
-                'energy'
-            )
-        }),
-    )
-
-    def has_add_permission(self, request):
-        return False
 
 
 @admin.register(Alert)
@@ -330,11 +309,22 @@ class AlertAdmin(admin.ModelAdmin):
     short_message.short_description = 'Wiadomość'
 
     def value_display(self, obj):
-        if obj.value and obj.threshold:
-            return format_html('{:.1f} / {:.1f}', obj.value, obj.threshold)
-        elif obj.value:
-            return format_html('{:.1f}', obj.value)
-        return '-'
+        """Bezpiecznie formatuje wartość i próg, nawet jeśli są None."""
+        value_str = '-'
+        threshold_str = '-'
+
+        if obj.value is not None:
+            value_str = f"{obj.value:.1f}"
+            
+        if obj.threshold is not None:
+            threshold_str = f"{obj.threshold:.1f}"
+
+        if obj.value is not None and obj.threshold is not None:
+            return f"{value_str} / {threshold_str}"
+        elif obj.value is not None:
+            return value_str
+        else:
+            return '-'
 
     value_display.short_description = 'Wartość/Próg'
 

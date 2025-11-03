@@ -9,7 +9,7 @@
       <env name="DJANGO_SETTINGS_MODULE" value="project.settings" />
     </envs>
     <option name="SDK_HOME" value="" />
-    <option name="SDK_NAME" value="Python 3.9 (djangoProject)" />
+    <option name="SDK_NAME" value="$USER_HOME$/miniforge3" />
     <option name="WORKING_DIRECTORY" value="" />
     <option name="IS_MODULE_SDK" value="false" />
     <option name="ADD_CONTENT_ROOTS" value="true" />

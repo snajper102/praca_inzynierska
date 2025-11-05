@@ -8,7 +8,7 @@ USERNAME    = "admin"                 # Twój superużytkownik
 PASSWORD    = "admin"    # Hasło admina
 TOKEN_URL   = "http://localhost:8000/api-token-auth/"
 READINGS_URL = "http://localhost:8000/api/admin/sensor/readings/"
-SENSOR_ID   = "1"               # Musi istnieć w bazie
+SENSOR_ID   = "2"               # Musi istnieć w bazie
 
 # 2) Pobierz token
 resp = requests.post(TOKEN_URL, json={

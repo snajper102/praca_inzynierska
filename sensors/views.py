@@ -9,14 +9,13 @@ from django.contrib.auth.models import User
 from django.contrib import messages
 from django.utils import timezone
 from django.views.decorators.csrf import csrf_exempt
-from django.db.models import Avg, Max, Min, Count
+from django.db.models import Avg, Max, Min, Count # Zachowujemy ten import
+from django.db import models # <-- POPRAWKA: Dodano brakujący import 'models'
 
-# POPRAWKA: Zaimportuj AlertForm
 try:
-    from .forms import CustomUserCreationForm, AlertForm
+    from .forms import CustomUserCreationForm
 except ImportError:
     from django.contrib.auth.forms import UserCreationForm as CustomUserCreationForm
-    from .forms import AlertForm # Spróbuj ponownie
 
 
 from rest_framework import viewsets, status
@@ -480,7 +479,7 @@ def sensor_detail(request, sensor_id):
     # 3. Pobierz ostatnie 10 pomiarów do tabeli
     last_10_readings = SensorData.objects.filter(sensor=sensor).order_by('-timestamp')[:10]
     
-    # 4. Pobierz średnią z ostatnich 5 pomiarów
+    # 4. Pobierz średnią z ostatnich 5 pomiarów (zgodnie z prośbą)
     recent_readings = SensorData.objects.filter(sensor=sensor).order_by('-timestamp')[:5]
     avg_stats = recent_readings.aggregate(
         power=Avg('power'),
@@ -489,7 +488,7 @@ def sensor_detail(request, sensor_id):
         pf=Avg('pf')
     )
 
-    # 5. Pobierz ustawienia odświeżania
+    # 5. Pobierz ustawienia odświeżania (dla danych live)
     user_settings, _ = UserSettings.objects.get_or_create(user=request.user)
 
     context = {
@@ -505,20 +504,19 @@ def sensor_detail(request, sensor_id):
     return render(request, 'sensor_detail.html', context)
 
 
-# --- NOWY WIDOK DO TWORZENIA ALERTÓW ---
 @login_required
 def create_alert(request):
     """Widok formularza do ręcznego tworzenia alertów."""
+    from .forms import AlertForm # Import AlertForm tutaj
+    
     if request.method == 'POST':
         # Przekaż zalogowanego użytkownika do formularza
         form = AlertForm(request.POST, user=request.user)
         if form.is_valid():
             alert = form.save(commit=False)
-            # Domyślnie ustawiamy alert jako nierozwiązany
             alert.is_resolved = False 
             alert.save()
             
-            # Zaloguj aktywność
             log_activity(
                 user=request.user,
                 action='create',
@@ -540,7 +538,6 @@ def create_alert(request):
         'form': form
     }
     return render(request, 'alert_create.html', context)
-# --- KONIEC NOWEGO WIDOKU ---
 
 
 @login_required
@@ -629,9 +626,6 @@ def comparison_view(request, house_id):
     return render(request, 'comparison.html', context)
 
 
-# Usunięto widok live_widget_view
-
-
 @login_required
 def admin_dashboard(request):
     """Dashboard dla administratorów"""
@@ -680,6 +674,30 @@ def admin_dashboard(request):
         'top_users': user_consumptions[:10],
     }
     return render(request, 'admin_dashboard.html', context)
+
+
+@login_required
+def admin_sensor_list_view(request):
+    """Wyświetla pełną listę czujników z informacjami i linkami do edycji (dla admina)"""
+    if not request.user.is_staff:
+        return HttpResponseForbidden("Brak dostępu")
+    
+    # POPRAWKA: Przeniesienie importu models
+    from django.db import models 
+
+    # Używamy prefetch_related dla optymalizacji
+    all_sensors = Sensor.objects.all().select_related('house').prefetch_related(
+        models.Prefetch('data', queryset=SensorData.objects.order_by('-timestamp'), to_attr='last_reading_list')
+    ).order_by('house__name', 'name')
+
+    # Dodaj atrybut 'data.first()' dla wygody w szablonie (używając listy)
+    for sensor in all_sensors:
+        sensor.data.first = sensor.last_reading_list[0] if sensor.last_reading_list else None
+
+    context = {
+        'all_sensors': all_sensors
+    }
+    return render(request, 'admin_sensor_list.html', context)
 
 
 @login_required

@@ -31,6 +31,7 @@
     display: flex;
     gap: 1rem;
     margin-top: 1.5rem;
+    flex-wrap: wrap; /* Poprawka dla mobilnych */
   }
 
   .btn-action {
@@ -44,6 +45,7 @@
     transition: all 0.3s ease;
     display: inline-flex;
     align-items: center;
+    justify-content: center;
     gap: 0.5rem;
   }
 
@@ -282,11 +284,14 @@
   <p>Zarządzaj systemem, użytkownikami i monitoruj aktywność</p>
   
   <div class="quick-actions">
+    <a href="{% url 'admin_sensor_list' %}" class="btn-action">
+      <i class="fas fa-plug"></i> Zarządzaj Czujnikami (Tabela)
+    </a>
     <a href="{% url 'assign_house' %}" class="btn-action">
       <i class="fas fa-plus-circle"></i> Przypisz dom
     </a>
     <a href="/admin/" class="btn-action">
-      <i class="fas fa-cog"></i> Django Admin
+      <i class="fas fa-cog"></i> Django Admin (Pełna Edycja)
     </a>
     <a href="{% url 'alerts' %}" class="btn-action">
       <i class="fas fa-bell"></i> Zobacz alerty
@@ -294,7 +299,6 @@
   </div>
 </div>
 
-<!-- Statystyki -->
 <div class="stats-grid">
   <div class="stat-card">
     <div class="stat-icon blue">
@@ -345,9 +349,7 @@
   </div>
 </div>
 
-<!-- Content Grid -->
 <div class="content-grid">
-  <!-- Ostatnia aktywność -->
   <div class="panel">
     <div class="panel-header">
       <h2><i class="fas fa-history"></i> Ostatnia aktywność</h2>
@@ -382,7 +384,6 @@
     </div>
   </div>
 
-  <!-- Top użytkownicy -->
   <div class="panel">
     <div class="panel-header">
       <h2><i class="fas fa-chart-bar"></i> Top użytkownicy</h2>
@@ -409,7 +410,6 @@
   </div>
 </div>
 
-<!-- Alerty -->
 {% if unread_alerts > 0 or critical_alerts > 0 %}
 <div class="panel alerts-panel">
   <div class="panel-header">

@@ -8,9 +8,9 @@ from .views import (
     sensor_data_view, add_sensor_data, receive_sensor_readings, live_data_view,
     # HTML Views
     dashboard, sensor_detail, register, profile, settings_view,
-    alerts_view, create_alert, # <-- DODANO create_alert
-    comparison_view, 
-    admin_dashboard, assign_house_view
+    alerts_view, create_alert, comparison_view, 
+    admin_dashboard, assign_house_view,
+    admin_sensor_list_view, # <-- NOWY WIDOK
 )
 
 # --- ŚCIEŻKI API ---
@@ -36,14 +36,13 @@ html_urlpatterns = [
     path('profile/', profile, name='profile'),
     path('settings/', settings_view, name='settings'),
     
-    # NOWA ŚCIEŻKA
     path('alerts/create/', create_alert, name='alert_create'), 
-    
     path('alerts/', alerts_view, name='alerts'),
     path('comparison/<int:house_id>/', comparison_view, name='comparison'),
     
-    # Admin Routes (HTML)
+    # NOWE ŚCIEŻKI ADMINA
     path('admin-panel/', admin_dashboard, name='admin_dashboard'),
+    path('admin-panel/sensors/', admin_sensor_list_view, name='admin_sensor_list'), # <-- NOWA LISTA
     path('admin-panel/assign/', assign_house_view, name='assign_house'),
 ]
 

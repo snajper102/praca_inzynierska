@@ -4,6 +4,29 @@ from django.urls import reverse
 from django.utils.safestring import mark_safe
 from .models import House, Sensor, SensorData, Alert, UserSettings, ActivityLog
 from django.db.models import Avg, Max
+from django.contrib.admin import SimpleListFilter
+from django.utils import timezone
+from datetime import timedelta
+
+
+# --- LISTA FILTRÓW DLA ADMINA ---
+class OnlineStatusFilter(SimpleListFilter):
+    title = 'Status Online'
+    parameter_name = 'is_online_status'
+
+    def lookups(self, request, model_admin):
+        return [
+            ('online', 'Online (aktywne)'),
+            ('offline', 'Offline (brak danych)'),
+        ]
+
+    def queryset(self, request, queryset):
+        if self.value() == 'online':
+            # Używamy filter(pk__in=...) do bezpiecznego filtrowania po is_online
+            return queryset.filter(pk__in=[s.pk for s in queryset if s.is_online])
+        if self.value() == 'offline':
+            return queryset.filter(pk__in=[s.pk for s in queryset if not s.is_online])
+        return queryset
 
 
 class SensorDataInline(admin.TabularInline):
@@ -11,19 +34,13 @@ class SensorDataInline(admin.TabularInline):
     model = SensorData
     extra = 0
     fields = ('timestamp', 'voltage', 'current', 'power', 'energy', 'frequency', 'pf', 'reactive_power')
-    
-    # --- POPRAWKA BŁĘDU 'TooManyFieldsSent' ---
-    # Ustawiamy wszystkie pola jako tylko do odczytu.
-    # To zatrzyma renderowanie tysięcy pól formularza.
     readonly_fields = ('timestamp', 'voltage', 'current', 'power', 'energy', 'frequency', 'pf', 'reactive_power')
-    # --- KONIEC POPRAWKI ---
-    
     can_delete = False
-    max_num = 10 # Pokaż tylko 10 ostatnich
+    max_num = 10 # Użyj max_num do ograniczenia, a nie slice
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        # Zostawiamy order_by, ale usuwamy slice [:10], który powodował błąd TypeError
+        # POPRAWKA BŁĘDU: Usunięto [:10]
         return qs.order_by('-timestamp')
 
 
@@ -31,7 +48,6 @@ class SensorInline(admin.TabularInline):
     """Inline dla czujników"""
     model = Sensor
     extra = 1
-    # Dodajemy nowe pola reguł
     fields = ('sensor_id', 'name', 'location', 'is_active', 'power_threshold', 
               'current_max_threshold', 'voltage_min_threshold', 'voltage_max_threshold', 
               'offline_threshold_seconds')
@@ -49,7 +65,8 @@ class AlertInline(admin.TabularInline):
 
     def get_queryset(self, request):
         qs = super().get_queryset(request)
-        return qs.order_by('-created_at')[:5]
+        # POPRAWKA BŁĘDU: Usunięto [:5]
+        return qs.order_by('-created_at')
 
 
 @admin.register(House)
@@ -66,7 +83,7 @@ class HouseAdmin(admin.ModelAdmin):
     )
     list_filter = ('user', 'created_at')
     search_fields = ('name', 'address', 'user__username', 'user__email')
-    inlines = [SensorInline, AlertInline]
+    inlines = [SensorInline, AlertInline] # Ten inline używa AlertInline, stąd błąd
     readonly_fields = ('created_at', 'get_monthly_usage', 'get_current_power')
 
     fieldsets = (
@@ -115,21 +132,19 @@ class HouseAdmin(admin.ModelAdmin):
     status_badge.short_description = 'Status'
 
     def get_monthly_usage(self, obj):
-        from django.utils import timezone
-        from datetime import timedelta
+        from .utils import calculate_energy_for_period
         now = timezone.now()
         start = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
         
         try:
-            from .utils import calculate_energy_for_period
             total_kwh = calculate_energy_for_period(obj, start, now)
         except ImportError:
             total_kwh = 0
 
         cost = total_kwh * obj.price_per_kwh
         return format_html(
-            '<strong>{:.2f} kWh</strong> ({:.2f} PLN)',
-            total_kwh, cost
+            '<strong>{} kWh</strong> ({} PLN)',
+            f"{total_kwh:.2f}", f"{cost:.2f}"
         )
 
     get_monthly_usage.short_description = 'Zużycie w miesiącu'
@@ -141,7 +156,7 @@ class HouseAdmin(admin.ModelAdmin):
                 last = sensor.data.order_by('-timestamp').first()
                 if last and last.power:
                     total_power += float(last.power)
-        return format_html('<strong>{:.0f} W</strong>', total_power)
+        return format_html('<strong>{} W</strong>', f"{total_power:.0f}")
 
     get_current_power.short_description = 'Aktualna moc'
 
@@ -158,9 +173,9 @@ class SensorAdmin(admin.ModelAdmin):
         'is_active',
         'created_at'
     )
-    list_filter = ('is_active', 'house', 'created_at')
+    list_filter = (OnlineStatusFilter, 'is_active', 'house', 'created_at')
     search_fields = ('sensor_id', 'name', 'house__name', 'location', 'description')
-    inlines = [SensorDataInline]
+    inlines = [SensorDataInline] # Ten inline używa SensorDataInline
     readonly_fields = ('created_at', 'get_last_reading', 'get_statistics')
 
     fieldsets = (
@@ -170,7 +185,6 @@ class SensorAdmin(admin.ModelAdmin):
         ('Lokalizacja i wygląd', {
             'fields': ('location', 'icon', 'color')
         }),
-        # Dodajemy pola reguł
         ('Alerty (Reguły)', {
             'fields': (
                 'power_threshold', 
@@ -206,7 +220,7 @@ class SensorAdmin(admin.ModelAdmin):
     def current_power(self, obj):
         last = obj.data.order_by('-timestamp').first()
         if last and last.power and obj.is_online:
-            return format_html('<strong>{:.1f} W</strong>', last.power)
+            return format_html('<strong>{} W</strong>', f"{last.power:.1f}")
         return '-'
 
     current_power.short_description = 'Moc'
@@ -216,23 +230,21 @@ class SensorAdmin(admin.ModelAdmin):
         if last:
             return format_html(
                 '<strong>Czas:</strong> {}<br>'
-                '<strong>Napięcie:</strong> {:.1f} V<br>'
-                '<strong>Prąd:</strong> {:.2f} A<br>'
-                '<strong>Moc:</strong> {:.1f} W<br>'
-                '<strong>PF:</strong> {:.2f}',
+                '<strong>Napięcie:</strong> {} V<br>'
+                '<strong>Prąd:</strong> {} A<br>'
+                '<strong>Moc:</strong> {} W<br>'
+                '<strong>PF:</strong> {}',
                 last.timestamp.strftime('%Y-%m-%d %H:%M:%S'),
-                last.voltage or 0,
-                last.current or 0,
-                last.power or 0,
-                last.pf or 0
+                f"{last.voltage or 0:.1f}",
+                f"{last.current or 0:.2f}",
+                f"{last.power or 0:.1f}",
+                f"{last.pf or 0:.2f}"
             )
         return 'Brak danych'
 
     get_last_reading.short_description = 'Ostatni odczyt'
 
     def get_statistics(self, obj):
-        from django.utils import timezone
-        from datetime import timedelta
         now = timezone.now()
         day_ago = now - timedelta(days=1)
 
@@ -244,13 +256,51 @@ class SensorAdmin(admin.ModelAdmin):
             max_power = data_24h.aggregate(max=Max('power'))['max'] or 0
             return format_html(
                 '<strong>Pomiary 24h:</strong> {}<br>'
-                '<strong>Śr. moc:</strong> {:.1f} W<br>'
-                '<strong>Max moc:</strong> {:.1f} W',
-                count, avg_power, max_power
+                '<strong>Śr. moc:</strong> {} W<br>'
+                '<strong>Max moc:</strong> {} W',
+                count, 
+                f"{avg_power:.1f}", 
+                f"{max_power:.1f}"
             )
         return 'Brak danych z ostatnich 24h'
 
     get_statistics.short_description = 'Statystyki 24h'
+
+
+@admin.register(SensorData)
+class SensorDataAdmin(admin.ModelAdmin):
+    list_display = (
+        'sensor',
+        'timestamp',
+        'voltage',
+        'current',
+        'power',
+        'reactive_power',
+        'energy',
+        'frequency',
+        'pf'
+    )
+    list_filter = ('sensor', 'timestamp')
+    search_fields = ('sensor__sensor_id', 'sensor__name')
+    readonly_fields = ('timestamp', 'reactive_power')
+    date_hierarchy = 'timestamp'
+
+    fieldsets = (
+        ('Czujnik', {
+            'fields': ('sensor', 'timestamp')
+        }),
+        ('Parametry elektryczne', {
+            'fields': (
+                ('voltage', 'current'),
+                ('power', 'reactive_power'),
+                ('frequency', 'pf'),
+                'energy'
+            )
+        }),
+    )
+
+    def has_add_permission(self, request):
+        return False
 
 
 @admin.register(Alert)
@@ -305,8 +355,6 @@ class AlertAdmin(admin.ModelAdmin):
         if len(obj.message) > 50:
             return obj.message[:50] + '...'
         return obj.message
-
-    short_message.short_description = 'Wiadomość'
 
     def value_display(self, obj):
         """Bezpiecznie formatuje wartość i próg, nawet jeśli są None."""

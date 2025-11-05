@@ -22,6 +22,11 @@ INSTALLED_APPS = [
     'sensors',  # nasza aplikacja
 ]
 
+# --- POPRAWKA: Zwiększenie limitu pól POST dla Admina ---
+# Naprawia błąd TooManyFieldsSent spowodowany dużą liczbą wierszy w Inline (SensorData)
+DATA_UPLOAD_MAX_NUMBER_FIELDS = 20000 
+# --- KONIEC POPRAWKI ---
+
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',

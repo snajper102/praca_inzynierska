@@ -1,5 +1,6 @@
 from rest_framework import serializers
 from datetime import timezone
+from django.contrib.auth.models import User
 from .models import House, Sensor, SensorData, Alert, UserSettings
 
 
@@ -15,22 +16,30 @@ class SensorReadingSerializer(serializers.Serializer):
     pf = serializers.FloatField()
 
 
-class HouseSerializer(serializers.ModelSerializer):
-    """Serializer dla modelu House"""
-    sensor_count = serializers.SerializerMethodField()
+# --- NOWY SERIALIZER ---
+class UserSettingsSerializer(serializers.ModelSerializer):
+    """Serializer dla modelu UserSettings"""
+    class Meta:
+        model = UserSettings
+        fields = [
+            'id', 'theme', 'email_alerts', 'alert_frequency',
+            'live_refresh_interval', 'show_predictions', 'monthly_goal_kwh'
+        ]
+
+# --- NOWY SERIALIZER ---
+class UserSerializer(serializers.ModelSerializer):
+    """Serializer dla modelu User, zagnieżdża UserSettings"""
+    # Używamy 'settings', bo tak nazwałeś related_name w UserSettings
+    settings = UserSettingsSerializer(read_only=True) 
 
     class Meta:
-        model = House
+        model = User
         fields = [
-            'id', 'user', 'name', 'address', 'price_per_kwh',
-            'monthly_limit_kwh', 'alert_email', 'created_at', 'sensor_count'
+            'id', 'username', 'email', 'first_name', 'last_name',
+            'is_staff', 'date_joined', 'settings'
         ]
-        read_only_fields = ['created_at']
 
-    def get_sensor_count(self, obj):
-        return obj.sensors.count()
-
-
+# --- ZMODYFIKOWANY SERIALIZER ---
 class SensorSerializer(serializers.ModelSerializer):
     """Serializer dla modelu Sensor"""
     is_online = serializers.SerializerMethodField()
@@ -41,6 +50,8 @@ class SensorSerializer(serializers.ModelSerializer):
         fields = [
             'id', 'house', 'sensor_id', 'name', 'description',
             'location', 'icon', 'color', 'is_active', 'power_threshold',
+            'current_max_threshold', 'voltage_min_threshold', 'voltage_max_threshold',
+            'offline_threshold_seconds',
             'created_at', 'is_online', 'last_reading'
         ]
         read_only_fields = ['created_at']
@@ -54,10 +65,27 @@ class SensorSerializer(serializers.ModelSerializer):
             return {
                 'timestamp': last.timestamp,
                 'power': last.power,
-                'voltage': last.voltage,
-                'current': last.current,
             }
         return None
+
+# --- ZMODYFIKOWANY SERIALIZER ---
+class HouseSerializer(serializers.ModelSerializer):
+    """Serializer dla modelu House Z ZAGNIEŻDŻONYMI CZUJNIKAMI"""
+    sensor_count = serializers.SerializerMethodField()
+    # Zagnieżdżamy SensorSerializer
+    sensors = SensorSerializer(many=True, read_only=True) 
+
+    class Meta:
+        model = House
+        fields = [
+            'id', 'user', 'name', 'address', 'price_per_kwh',
+            'monthly_limit_kwh', 'alert_email', 'created_at', 
+            'sensor_count', 'sensors'  # Dodajemy 'sensors'
+        ]
+        read_only_fields = ['created_at']
+
+    def get_sensor_count(self, obj):
+        return obj.sensors.count()
 
 
 class SensorDataSerializer(serializers.ModelSerializer):
@@ -93,16 +121,3 @@ class AlertSerializer(serializers.ModelSerializer):
             'is_read', 'is_resolved', 'email_sent'
         ]
         read_only_fields = ['created_at']
-
-
-class UserSettingsSerializer(serializers.ModelSerializer):
-    """Serializer dla modelu UserSettings"""
-
-    class Meta:
-        model = UserSettings
-        fields = [
-            'id', 'user', 'theme', 'email_alerts', 'alert_frequency',
-            'live_refresh_interval', 'show_predictions', 'monthly_goal_kwh',
-            'created_at', 'updated_at'
-        ]
-        read_only_fields = ['created_at', 'updated_at']

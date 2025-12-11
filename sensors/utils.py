@@ -99,7 +99,7 @@ def check_alerts(sensor, sensor_data):
             alerts_created.append(alert)
 
     #
-    # --- NOWA REGUŁA: Alert przekroczenia prądu (Twoja prośba) ---
+    #  Alert przekroczenia prądu
     #
     if sensor.current_max_threshold and sensor_data.current and sensor_data.current > sensor.current_max_threshold:
         if not Alert.objects.filter(
@@ -117,7 +117,7 @@ def check_alerts(sensor, sensor_data):
                 threshold=sensor.current_max_threshold
             )
             alerts_created.append(alert)
-    # --- KONIEC NOWEJ REGUŁY ---
+
 
 
     # 4. Alert "Czujnik Wrócił Online"
